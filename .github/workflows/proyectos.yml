@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: write  # keepalive: `enable` de este workflow
 
 concurrency:
   group: proyectos
@@ -25,3 +26,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
         run: python3 -I scripts/proyectos_sync.py mariomina Escala-Agencia
+      # GitHub desactiva los `schedule` de un repo público tras 60 días sin actividad, y un workflow
+      # desactivado no vuelve con ningún trigger. `enable` sobre un workflow activo reinicia ese contador
+      # (uno apagado a mano no se toca). Si aun así se desactiva, `github_pendientes.py` lo avisa.
+      - name: Mantener vivo este workflow
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows/proyectos.yml"
+          estado=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$api" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')
+          if [ "$estado" = active ]; then
+            curl -fsS -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$api/enable"
+          fi
+          echo "proyectos.yml: $estado"
