@@ -1,0 +1,27 @@
+# Automatizaciones de los Projects de mariomina y Escala-Agencia (los workflows integrados no tienen API).
+# Alta de issues de los repos enlazados, Status inicial, Status final al cerrar y archivado a los 14 días.
+# Corre aquí porque el repo es público: sus minutos de Actions no cuentan.
+name: proyectos
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: proyectos
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Sincronizar proyectos
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+        run: python3 -I scripts/proyectos_sync.py mariomina Escala-Agencia
