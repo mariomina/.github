@@ -33,6 +33,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # cargar filtro_global.py no deja __pycache__ en scripts/
+
 API = "https://api.github.com"
 HOME_REPO = "mariomina/home-mario"
 CACHE = Path.home() / ".cache" / "mariomina-github" / "pendientes.json"  # fija: la comparten Claudian y Hermes
