@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.1](https://github.com/mariomina/.github/compare/v1.3.0...v1.3.1) (2026-11-14)
+
+
+### Correcciones
+
+* el barrido sale de este repo público; proyectos.yml se mantiene vivo solo ([46ee418](https://github.com/mariomina/.github/commit/46ee418ba8d985230310cb1ffa95f801c887a045))
+* en un log público, los scripts no nombran repos, PR, ramas, títulos ni proyectos ([e281782](https://github.com/mariomina/.github/commit/e2817826e352a144c8834ce0b55a63e73ad1f0b2))
+* ningún log público con datos de repos privados; el barrido sale de este repo ([199f68a](https://github.com/mariomina/.github/commit/199f68a9e483eabf57c3065e608c0090805bdd95))
+
+
+### Documentación
+
+* logs públicos sin datos privados y contrato del barrido de home-mario ([282c516](https://github.com/mariomina/.github/commit/282c516538fff0080702ab8d25b1d942572c661b))
+
 ## [1.3.0](https://github.com/mariomina/.github/compare/v1.2.0...v1.3.0) (2026-11-14)
 
 
