@@ -85,3 +85,8 @@ jobs:
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
           skip-github-pull-request: true
+      - name: Comprobar que la versión se publicó
+        if: steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0' && steps.rp2.outputs.releases_created != 'true'
+        run: |
+          echo "::error::Se fusionó la PR de versión, pero release-please no publicó la versión en la segunda pasada"
+          exit 1

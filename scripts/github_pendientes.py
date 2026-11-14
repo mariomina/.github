@@ -48,9 +48,9 @@ RE_VERSION = re.compile(r"v?(\d+(?:\.\d+)*)")
 
 FRAGMENTO = """fragment R on Repository {
   nameWithOwner mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
-  defaultBranchRef { name target { ... on Commit { statusCheckRollup { state } } } }
+  defaultBranchRef { name target { ... on Commit { history(first: 5) { nodes { statusCheckRollup { state } } } } } }
   pullRequests(states: OPEN, first: 50) { nodes {
-    number title url createdAt updatedAt isDraft headRefName headRefOid author { login }
+    number title url createdAt updatedAt isDraft isCrossRepository headRefName headRefOid author { login }
     commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } }
   refs(refPrefix: "refs/heads/", first: 100, orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
     nodes { name target { ... on Commit { committedDate } } } }
@@ -145,17 +145,30 @@ def _version(texto):
 
 
 def salto(titulo):
-    """parche | menor | mayor desde «from A to B» del título. Sin semver, con sufijo o con 0.x cambiando: mayor."""
+    """parche | menor | mayor desde «from A to B» del título.
+
+    Mayor: sin semver, con sufijo, bajada de versión, cambio de 0.x o cualquier cambio en 0.0.x.
+    """
     m = RE_SALTO.search(titulo)
     a, b = (_version(m.group(1)), _version(m.group(2))) if m else (None, None)
-    if not a or not b or a[0] != b[0] or (b[0] == 0 and a[1] != b[1]):
+    if not a or not b or b < a or a[0] != b[0] or (b[0] == 0 and (a[1] != b[1] or b[1] == 0)):
         return "mayor"
     return "menor" if a[1] != b[1] else "parche"
 
 
+def _autor(pr):
+    """Login sin `app/` ni `[bot]`: GraphQL, REST y `gh` lo escriben distinto."""
+    return ((pr.get("author") or {}).get("login") or "").removeprefix("app/").removesuffix("[bot]")
+
+
+def _es_version(pr):
+    """Rama de release-please, autor github-actions y no desde un fork (una rama así en un fork no cuenta)."""
+    return (pr.get("headRefName", "").startswith("release-please--") and _autor(pr) == "github-actions"
+            and pr.get("isCrossRepository") is False)
+
+
 def _es_dependabot(pr):
-    autor = ((pr.get("author") or {}).get("login") or "").removesuffix("[bot]")
-    return autor == "dependabot" or pr.get("headRefName", "").startswith("dependabot/")
+    return _autor(pr) == "dependabot" and pr.get("isCrossRepository") is False
 
 
 def clasificar_pr(repo, pr, ahora):
@@ -164,7 +177,7 @@ def clasificar_pr(repo, pr, ahora):
           or {}).get("state")
     e = {"repo": repo, "numero": pr["number"], "titulo": pr["title"], "url": pr.get("url"),
          "sha": pr.get("headRefOid"), "ci": ci, "creada": pr.get("createdAt")}
-    if pr.get("headRefName", "").startswith("release-please--"):
+    if _es_version(pr):
         quieta = ahora - _fecha(pr.get("updatedAt") or pr["createdAt"])
         e.update(clase="version", accion="fusionar" if quieta >= VERSION_ATASCADA else "esperar",
                  motivo="atascada: la fusiona el barrido" if quieta >= VERSION_ATASCADA else "la fusiona el job")
@@ -204,7 +217,9 @@ def analizar(nodos, errores, ahora):
                 avisos.append({"repo": repo, "tipo": "pr-vieja", "detalle": f"#{pr['number']} {pr['title']}",
                                "url": pr.get("url")})
         principal = n.get("defaultBranchRef") or {}
-        estado = (((principal.get("target") or {}).get("statusCheckRollup")) or {}).get("state")
+        # Primer commit con checks: el merge de una PR de versión con GITHUB_TOKEN no tiene ninguno.
+        historia = (((principal.get("target") or {}).get("history")) or {}).get("nodes") or []
+        estado = next((c["statusCheckRollup"].get("state") for c in historia if c.get("statusCheckRollup")), None)
         if estado in ("FAILURE", "ERROR"):
             avisos.append({"repo": repo, "tipo": "ci-rojo", "detalle": f"CI rojo en {principal.get('name')}"})
         con_pr = {pr.get("headRefName") for pr in abiertas}
@@ -335,7 +350,7 @@ def leer_cache(ruta=CACHE):
 
 def guardar_cache(estado, ruta=CACHE):
     ruta.parent.mkdir(parents=True, exist_ok=True)
-    tmp = ruta.with_suffix(".tmp")
+    tmp = ruta.with_name(f"{ruta.name}.{os.getpid()}.tmp")  # dos escritores a la vez no comparten tmp
     tmp.write_text(json.dumps(estado, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, ruta)
 
@@ -344,21 +359,23 @@ def refrescar(ruta=CACHE, ahora=None):
     """Consulta GitHub y escribe la caché; un fallo queda en la caché como motivo."""
     ahora = ahora or datetime.now(timezone.utc)
     try:
-        token = obtener_token()
-        if not token:
-            raise Fallo("sin token")
-        estado = recoger(token, ahora)
-    except Fallo as e:
-        estado = {"generado": ahora.isoformat(timespec="seconds"), "error": str(e)}
-    except urllib.error.HTTPError as e:
-        estado = {"generado": ahora.isoformat(timespec="seconds"), "error": f"GitHub respondió {e.code}"}
-    except (urllib.error.URLError, OSError) as e:
-        estado = {"generado": ahora.isoformat(timespec="seconds"),
-                  "error": f"sin red: {getattr(e, 'reason', e)}"[:120]}
-    except Exception as e:  # noqa: BLE001 - el refresco en segundo plano nunca deja traza
-        estado = {"generado": ahora.isoformat(timespec="seconds"), "error": f"{type(e).__name__}: {e}"[:120]}
-    guardar_cache(estado, ruta)
-    ruta.with_suffix(".lock").unlink(missing_ok=True)
+        try:
+            token = obtener_token()
+            if not token:
+                raise Fallo("sin token")
+            estado = recoger(token, ahora)
+        except Fallo as e:
+            estado = {"generado": ahora.isoformat(timespec="seconds"), "error": str(e)}
+        except urllib.error.HTTPError as e:
+            estado = {"generado": ahora.isoformat(timespec="seconds"), "error": f"GitHub respondió {e.code}"}
+        except (urllib.error.URLError, OSError) as e:
+            estado = {"generado": ahora.isoformat(timespec="seconds"),
+                      "error": f"sin red: {getattr(e, 'reason', e)}"[:120]}
+        except Exception as e:  # noqa: BLE001 - el refresco en segundo plano nunca deja traza
+            estado = {"generado": ahora.isoformat(timespec="seconds"), "error": f"{type(e).__name__}: {e}"[:120]}
+        guardar_cache(estado, ruta)
+    finally:
+        ruta.with_suffix(".lock").unlink(missing_ok=True)
     return estado
 
 
@@ -439,13 +456,12 @@ def main(argv=None):
         return 1
     try:
         estado = recoger(token, ahora)
-    except (Fallo, urllib.error.URLError) as e:
-        print(f"github_pendientes: {e}", file=sys.stderr)
+    except (Fallo, OSError, ValueError) as e:  # OSError cubre URLError, timeouts y conexiones cortadas
+        print(f"github_pendientes: {type(e).__name__}: {e}", file=sys.stderr)
         return 1
     errores = []
     if a.fusionar:
-        hechas, errores = fusionar(estado, token)
-        estado["prs"] = [e for e in estado["prs"] if e not in hechas]
+        _, errores = fusionar(estado, token)  # las fusionadas siguen en la tabla y la caché como `fusionada`
     if not os.environ.get("GITHUB_ACTIONS"):
         guardar_cache(estado)
     sys.stdout.write(json.dumps(estado, ensure_ascii=False, indent=2) + "\n" if a.json else tabla(estado, ahora))
