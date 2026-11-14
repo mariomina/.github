@@ -20,9 +20,10 @@ jobs:
       - uses: actions/checkout@v5
       - name: Sin marcas de conflicto
         run: |
-          if git grep -nE '^(<<<<<<<|>>>>>>>) ' -- . ':!*.lock'; then
-            echo "::error::Quedan marcas de conflicto"; exit 1
-          fi
+          rc=0
+          git grep -nE '^(<<<<<<<|>>>>>>>) ' -- . ':!*.lock' || rc=$?
+          if [ "$rc" -eq 0 ]; then echo "::error::Quedan marcas de conflicto"; exit 1; fi
+          if [ "$rc" -gt 1 ]; then echo "::error::git grep falló ($rc)"; exit "$rc"; fi
       - name: Detectar Python
         id: py
         run: |
@@ -33,11 +34,17 @@ jobs:
           python-version: ${{ inputs.python-version }}
       - name: Instalar
         if: steps.py.outputs.hay == 'true'
-        run: uv sync --all-extras --dev
+        run: |
+          if [ -f uv.lock ]; then uv sync --locked --all-extras --dev; else uv sync --all-extras --dev; fi
       - name: Lint
         if: steps.py.outputs.hay == 'true'
-        run: uvx ruff check .
+        # Usa la versión de ruff del proyecto si la declara; si no, la última
+        run: uv run --with ruff ruff check .
       - name: Tests
         if: steps.py.outputs.hay == 'true'
         run: |
-          if [ -d tests ]; then uv run --with pytest pytest -q; else echo "Sin carpeta tests/"; fi
+          if [ ! -d tests ]; then echo "Sin carpeta tests/"; exit 0; fi
+          rc=0; uv run --with pytest pytest -q || rc=$?
+          # 5 = no se recogió ningún test (repo recién creado)
+          if [ "$rc" -eq 5 ]; then echo "Sin tests todavía"; exit 0; fi
+          exit "$rc"
