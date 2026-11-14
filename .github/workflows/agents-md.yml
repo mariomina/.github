@@ -14,11 +14,11 @@ jobs:
     runs-on: ubuntu-slim
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: AGENTS.md
           sparse-checkout-cone-mode: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: mariomina/.github
           path: .filtro

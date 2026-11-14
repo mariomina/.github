@@ -42,7 +42,7 @@ jobs:
           manifest-file: ${{ inputs.manifest-file }}
       # La fusión es `github_pendientes.py --fusionar-version` (con tests en scripts/tests), desde la rama
       # principal de mariomina/.github, como agents-md.yml.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: steps.rp.outputs.prs_created == 'true'
         with:
           repository: mariomina/.github
