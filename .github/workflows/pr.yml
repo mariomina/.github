@@ -13,3 +13,10 @@ jobs:
     uses: ./.github/workflows/pr-titulo.yml
   agents-md:
     uses: ./.github/workflows/agents-md.yml
+  tests:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tests de los scripts
+        run: python3 -B -m unittest discover -s scripts/tests -v
