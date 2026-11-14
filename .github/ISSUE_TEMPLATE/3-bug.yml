@@ -1,5 +1,6 @@
 name: Bug
 description: Algo no funciona como debería.
+type: Bug
 projects: ["mariomina/2"]
 body:
   - type: textarea

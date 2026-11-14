@@ -1,5 +1,6 @@
 name: Tarea
 description: Trabajo concreto que cabe en una rama y una PR.
+type: Tarea
 projects: ["mariomina/2"]
 body:
   - type: textarea

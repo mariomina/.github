@@ -1,5 +1,6 @@
 name: Mejora
 description: Capacidad nueva o mejora de una existente.
+type: Mejora
 projects: ["mariomina/2"]
 body:
   - type: textarea
