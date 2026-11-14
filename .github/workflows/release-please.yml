@@ -35,7 +35,7 @@ jobs:
       releases_created: ${{ steps.rp.outputs.releases_created == 'true' || steps.rp2.outputs.releases_created == 'true' }}
       major: ${{ steps.rp2.outputs.major || steps.rp.outputs.major }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: rp
         with:
           config-file: ${{ inputs.config-file }}
@@ -57,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PRS: ${{ steps.rp.outputs.prs }}
         run: python3 -I .mantenimiento/scripts/github_pendientes.py --fusionar-version
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: rp2
         if: ${{ !cancelled() && steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0' }}
         with:
