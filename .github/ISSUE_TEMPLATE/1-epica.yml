@@ -1,5 +1,6 @@
 name: Épica
 description: Objetivo grande que se divide en sub-issues.
+projects: ["mariomina/2"]
 title: "[Épica] "
 body:
   - type: textarea
