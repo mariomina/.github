@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.3.0](https://github.com/mariomina/.github/compare/v1.2.0...v1.3.0) (2026-11-14)
+
+
+### Novedades
+
+* --fusionar-version con tests y aviso de workflows desactivados por inactividad ([e66d38f](https://github.com/mariomina/.github/commit/e66d38fa68a0c000183eeff5417a1ed6053a9503))
+* keepalive de los workflows programados y fusión de versión con tests ([92a5823](https://github.com/mariomina/.github/commit/92a5823147d2b53a867d1ec5f64aff806519a518))
+* release-please fusiona con github_pendientes.py y mantenimiento mantiene vivos los workflows programados ([2f2d4fc](https://github.com/mariomina/.github/commit/2f2d4fc2432c7c67bf1f80bb023e68118ce452aa))
+
+
+### Documentación
+
+* keepalive, aviso de workflows desactivados e interfaz de --fusionar-version ([0871d85](https://github.com/mariomina/.github/commit/0871d855a87ec1623fa6424df461a4b871755b28))
+
 ## [1.2.0](https://github.com/mariomina/.github/compare/v1.1.0...v1.2.0) (2026-11-14)
 
 
