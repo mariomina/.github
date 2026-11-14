@@ -1,0 +1,31 @@
+# Barrido de mantenimiento de GitHub cada hora (mariomina/2-cerebro#280). Decisiones de Mario: fusiona las
+# PR de versión atascadas (> 10 min sin cambios) y las de Dependabot de parche o menor con CI en verde; lo
+# demás (Dependabot mayor, PR de trabajo, avisos) solo se lista en el log. Fusiona con PROJECTS_TOKEN (token
+# de Mario): a diferencia de GITHUB_TOKEN, su merge dispara `push` y release-please publica la versión.
+# Corre aquí porque el repo es público: sus minutos de Actions no cuentan.
+name: mantenimiento
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mantenimiento
+  cancel-in-progress: false
+
+jobs:
+  barrido:
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts
+      - name: Fusionar lo que se fusiona solo y listar lo demás
+        env:
+          GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
+        run: python3 -I scripts/github_pendientes.py --fusionar
