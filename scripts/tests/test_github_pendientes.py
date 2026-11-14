@@ -279,5 +279,106 @@ class Linea(unittest.TestCase):
         self.assertEqual(gp.hermes("no es json", **kw), {})
 
 
+class WorkflowsDesactivados(unittest.TestCase):
+    def test_avisa_solo_de_los_desactivados_por_inactividad(self):
+        def http(metodo, url, token, cuerpo=None):
+            if "/o/sin/" in url:
+                raise urllib.error.HTTPError(url, 404, "x", {}, io.BytesIO(b"{}"))
+            return {"workflows": [
+                {"path": ".github/workflows/mantenimiento.yml", "state": "disabled_inactivity"},
+                {"path": ".github/workflows/pr.yml", "state": "active"},
+                {"path": ".github/workflows/viejo.yml", "state": "disabled_manually"}]}
+
+        with mock.patch.object(gp, "http", http):
+            avisos = gp.workflows_desactivados(["o/a", "o/sin"], "t")
+        self.assertEqual(avisos, [{"repo": "o/a", "tipo": "workflow-desactivado", "detalle":
+                                   "mantenimiento.yml: 60 días sin actividad; gh workflow enable mantenimiento.yml -R o/a"}])
+
+
+def error_http(codigo, mensaje):
+    return urllib.error.HTTPError("u", codigo, "x", {}, io.BytesIO(json.dumps({"message": mensaje}).encode()))
+
+
+class FusionarVersion(unittest.TestCase):
+    """`--fusionar-version`: el paso del job reutilizable release-please (antes JavaScript sin tests)."""
+
+    def correr(self, respuestas, prs='[{"number": 8}]'):
+        """respuestas: {número: [respuesta o excepción por llamada PUT/GET, en orden]}."""
+        llamadas, esperas = [], []
+
+        def http(metodo, url, token, cuerpo=None):
+            numero = int(url.split("/pulls/")[1].split("/")[0])
+            llamadas.append((metodo, numero, (cuerpo or {}).get("merge_method")))
+            r = respuestas[numero].pop(0)
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(gp, "http", http), \
+                mock.patch("builtins.print"):
+            salida = Path(d) / "out"
+            codigo = gp.fusionar_version(prs, "o/r", "t", str(salida), esperas.append)
+            return codigo, salida.read_text(), llamadas, esperas
+
+    def test_fusiona_con_merge_y_espera_antes_de_la_segunda_pasada(self):
+        codigo, salida, llamadas, esperas = self.correr({8: [{"merged": True}]})
+        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [10]))
+        self.assertEqual(llamadas, [("PUT", 8, "merge")])
+
+    def test_prueba_el_siguiente_metodo_si_el_repo_no_lo_permite(self):
+        codigo, salida, llamadas, _ = self.correr(
+            {8: [error_http(405, "Merge commits are not allowed on this repository."), {"merged": True}]})
+        self.assertEqual((codigo, salida), (0, "fusionadas=1\n"))
+        self.assertEqual(llamadas, [("PUT", 8, "merge"), ("PUT", 8, "squash")])
+
+    def test_reintenta_mientras_no_es_fusionable_y_detecta_ya_fusionada(self):
+        no_aun = lambda: error_http(405, "Pull Request is not mergeable")  # noqa: E731 - un cuerpo por respuesta
+        codigo, salida, llamadas, esperas = self.correr(
+            {8: [no_aun(), {"merged": False}, no_aun(), {"merged": True}]})
+        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [5, 10]))
+        self.assertEqual([m for m, _, _ in llamadas], ["PUT", "GET", "PUT", "GET"])
+
+    def test_tras_4_intentos_falla_pero_escribe_fusionadas_y_sigue_con_las_demas(self):
+        respuestas = [r for _ in range(4) for r in (error_http(409, "Head branch was modified"), {"merged": False})]
+        codigo, salida, llamadas, esperas = self.correr(
+            {8: respuestas, 9: [{"merged": True}]}, prs='[{"number": 8}, {"number": 9}]')
+        self.assertEqual((codigo, salida), (1, "fusionadas=1\n"))
+        self.assertEqual(esperas, [5, 5, 5, 10])
+        self.assertEqual(llamadas[-1], ("PUT", 9, "merge"))
+
+    def test_ningun_metodo_permitido_falla_sin_reintentar(self):
+        no = [error_http(405, f"{m} merges are not allowed") for m in ("Merge", "Squash", "Rebase")]
+        codigo, salida, llamadas, esperas = self.correr({8: no + [{"merged": False}]})
+        self.assertEqual((codigo, salida, esperas), (1, "fusionadas=0\n", []))
+        self.assertEqual(llamadas, [("PUT", 8, "merge"), ("PUT", 8, "squash"), ("PUT", 8, "rebase"), ("GET", 8, None)])
+
+    def test_un_error_de_red_se_comprueba_con_el_get_y_se_reintenta(self):
+        codigo, salida, llamadas, esperas = self.correr(
+            {8: [TimeoutError("timed out"), {"merged": False}, {"merged": True}]})
+        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [5, 10]))
+        self.assertEqual([m for m, _, _ in llamadas], ["PUT", "GET", "PUT"])
+
+    def test_un_put_que_llego_aunque_dio_timeout_cuenta_como_fusionada(self):
+        codigo, salida, _, esperas = self.correr({8: [TimeoutError("timed out"), {"merged": True}]})
+        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [10]))
+
+    def test_main_lee_prs_y_escribe_github_output(self):
+        with tempfile.TemporaryDirectory() as d:
+            salida = Path(d) / "out"
+            entorno = {"GITHUB_REPOSITORY": "o/r", "PRS": '[{"number": 8}]', "GITHUB_OUTPUT": str(salida)}
+            with mock.patch.object(gp, "obtener_token", return_value="t"), mock.patch.dict("os.environ", entorno), \
+                    mock.patch.object(gp, "fusionar_pr_version", return_value="merge") as fusionar, \
+                    mock.patch.object(gp.time, "sleep"), mock.patch("builtins.print"):
+                self.assertEqual(gp.main(["--fusionar-version"]), 0)
+            fusionar.assert_called_once()
+            self.assertEqual(fusionar.call_args.args[:3], ("o/r", 8, "t"))
+            self.assertEqual(salida.read_text(), "fusionadas=1\n")
+
+    def test_main_sin_repo_sale_con_1(self):
+        with mock.patch.object(gp, "obtener_token", return_value="t"), \
+                mock.patch.dict("os.environ", {"GITHUB_REPOSITORY": ""}), mock.patch("sys.stderr", io.StringIO()):
+            self.assertEqual(gp.main(["--fusionar-version"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

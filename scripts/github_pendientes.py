@@ -5,8 +5,9 @@ Decisiones de Mario (mariomina/2-cerebro#280):
     tras 10 min sin cambios, la fusiona `--fusionar` con el token de Mario (eso dispara la versión).
   - Dependabot de parche o menor: se fusiona sola con CI en verde (statusCheckRollup = SUCCESS).
   - Dependabot mayor (o título sin semver, o versión 0.x) y PR de trabajo: esperan la decisión de Mario.
-  - Avisos (nunca se borra ni se cierra nada): CI rojo en la rama principal, ramas sin PR y PR de más de
-    7 días, issues abiertos sin proyecto.
+  - Avisos (nunca se borra ni se cierra nada): workflow desactivado por 60 días sin actividad (no vuelve
+    con ningún trigger: el aviso da el `gh workflow enable` que lo recupera), CI rojo en la rama principal,
+    ramas sin PR y PR de más de 7 días, issues abiertos sin proyecto.
 
 Repos: home-mario y los punteros de su AGENTS.md, en cascada por los home repos (`punteros` de
 filtro_global.py). Cada AGENTS.md se lee por la API (rama principal): un clon local puede estar atrasado.
@@ -18,6 +19,10 @@ Uso (token: GH_TOKEN, GITHUB_TOKEN o `gh auth token`):
   github_pendientes.py --linea      una línea «GitHub: …» desde la caché; nunca espera a la red: si la caché
                                     tiene más de 10 min, la refresca en segundo plano. Siempre sale con 0
   github_pendientes.py --hermes     hook pre_llm_call de Hermes: {"context": línea} en el primer turno
+  github_pendientes.py --fusionar-version
+                                    paso del job reutilizable release-please: fusiona cada PR de $PRS en
+                                    $GITHUB_REPOSITORY y escribe `fusionadas=N` en $GITHUB_OUTPUT (también si
+                                    una falla); salida 1 si alguna falla
 """
 import argparse
 import importlib.util
@@ -28,6 +33,7 @@ import select
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -43,6 +49,8 @@ BLOQUEO = timedelta(minutes=2)      # un refresco en curso no se lanza dos veces
 VERSION_ATASCADA = timedelta(minutes=10)
 VIEJA = timedelta(days=7)
 MAX_REFS_LINEA = 4
+METODOS = ("merge", "squash", "rebase")  # `--fusionar-version` prueba en este orden los que el repo permita
+INTENTOS = 4                             # mientras GitHub calcula si la PR de versión es fusionable
 RE_SALTO = re.compile(r"\bfrom (\S+) to (\S+)", re.I)
 RE_VERSION = re.compile(r"v?(\d+(?:\.\d+)*)")
 
@@ -238,13 +246,42 @@ def analizar(nodos, errores, ahora):
             "avisos": avisos, "errores": errores}
 
 
+def workflows_desactivados(nombres, token):
+    """Avisos de los workflows que GitHub desactivó por 60 días sin actividad: no vuelven con ningún trigger."""
+    avisos = []
+    for repo in nombres:
+        try:
+            d = http("GET", f"{API}/repos/{repo}/actions/workflows?per_page=100", token)
+        except (OSError, ValueError):  # sin acceso o sin red: este refresco no lo comprueba; el siguiente sí
+            continue
+        for w in d.get("workflows") or []:
+            if w.get("state") == "disabled_inactivity":
+                archivo = (w.get("path") or w.get("name") or "?").rsplit("/", 1)[-1]
+                avisos.append({"repo": repo, "tipo": "workflow-desactivado",
+                               "detalle": f"{archivo}: 60 días sin actividad; gh workflow enable {archivo} -R {repo}"})
+    return avisos
+
+
 def recoger(token, ahora=None):
     os.environ["GH_TOKEN"] = token  # filtro_global.leer_remoto lo lee del entorno
-    nodos, errores = consultar(repos(cargar_filtro()), token)
-    return analizar(nodos, errores, ahora or datetime.now(timezone.utc))
+    nombres = repos(cargar_filtro())
+    nodos, errores = consultar(nombres, token)
+    estado = analizar(nodos, errores, ahora or datetime.now(timezone.utc))
+    estado["avisos"] = workflows_desactivados(nombres, token) + estado["avisos"]
+    return estado
 
 
 # --- fusión -------------------------------------------------------------------------
+
+def _motivo(x):
+    """El `message` del cuerpo de un HTTPError de GitHub ('' si no lo hay)."""
+    try:
+        return json.load(x).get("message", "")
+    except (ValueError, OSError, AttributeError):
+        return ""
+    finally:
+        x.close()
+
 
 def fusionar(estado, token):
     """Fusiona las PR con acción `fusionar` (con el sha revisado). Un error no corta las demás."""
@@ -255,12 +292,7 @@ def fusionar(estado, token):
             http("PUT", f"{API}/repos/{e['repo']}/pulls/{e['numero']}/merge", token,
                  {"merge_method": e.get("metodo") or "merge", "sha": e["sha"]})
         except urllib.error.HTTPError as x:
-            try:
-                motivo = json.load(x).get("message", "")
-            except (ValueError, OSError):
-                motivo = ""
-            finally:
-                x.close()
+            motivo = _motivo(x)
             errores.append({"repo": e["repo"], "detalle": f"#{e['numero']}: HTTP {x.code} {motivo}".strip()})
             print(f"Error al fusionar {etiqueta}: HTTP {x.code} {motivo}")
             continue
@@ -273,6 +305,57 @@ def fusionar(estado, token):
         print(f"Fusionada {etiqueta} ({e['clase']}): {e['titulo']}")
     estado["errores"] = estado.get("errores", []) + errores
     return hechas, errores
+
+
+def fusionar_pr_version(repo, numero, token, esperar=None):
+    """Fusiona una PR de versión con el primer método que el repo permita; reintenta mientras GitHub
+    calcula si es fusionable. Devuelve el método (o «ya estaba fusionada»); lanza Fallo si no puede."""
+    esperar = esperar or time.sleep
+    for intento in range(1, INTENTOS + 1):
+        error, no_permitido = "", False
+        for metodo in METODOS:
+            try:
+                http("PUT", f"{API}/repos/{repo}/pulls/{numero}/merge", token, {"merge_method": metodo})
+                return metodo
+            except urllib.error.HTTPError as x:
+                motivo = _motivo(x)
+                error, no_permitido = f"HTTP {x.code} {motivo}".strip(), x.code == 405 and "not allowed" in motivo.lower()
+                if not no_permitido:
+                    break
+            except OSError as x:  # red: el PUT pudo llegar; lo dice el GET de abajo
+                error = f"{type(x).__name__}: {x}"
+                break
+        try:
+            if http("GET", f"{API}/repos/{repo}/pulls/{numero}", token).get("merged"):
+                return "ya estaba fusionada"
+        except (OSError, ValueError) as x:
+            error = error or f"{type(x).__name__}: {x}"
+        if intento == INTENTOS or no_permitido:
+            raise Fallo(f"#{numero}: {error}")
+        print(f"#{numero}: {error}; reintento en 5 s")
+        esperar(5)
+
+
+def fusionar_version(prs, repo, token, salida=None, esperar=None):
+    """`--fusionar-version`: fusiona cada PR de `prs` (JSON de `outputs.prs` de release-please). Escribe
+    `fusionadas=N` en `salida` también si una falla: la segunda pasada publica las que sí entraron."""
+    esperar = esperar or time.sleep
+    fusionadas, fallos = 0, 0
+    try:
+        for pr in json.loads(prs or "[]"):
+            try:
+                print(f"#{pr['number']} fusionada ({fusionar_pr_version(repo, pr['number'], token, esperar)})")
+                fusionadas += 1
+            except (Fallo, OSError, ValueError) as e:
+                fallos += 1
+                print(f"::error::No se pudo fusionar la PR de versión {e}")
+        if fusionadas:
+            esperar(10)  # release-please lee la PR fusionada por la API
+    finally:
+        if salida:
+            with open(salida, "a", encoding="utf-8") as f:
+                f.write(f"fusionadas={fusionadas}\n")
+    return 1 if fallos else 0
 
 
 # --- salidas ------------------------------------------------------------------------
@@ -438,6 +521,7 @@ def main(argv=None):
     modo.add_argument("--fusionar", action="store_true")
     modo.add_argument("--linea", action="store_true")
     modo.add_argument("--hermes", action="store_true")
+    modo.add_argument("--fusionar-version", action="store_true")
     modo.add_argument("--refrescar", action="store_true", help=argparse.SUPPRESS)
     a = p.parse_args(argv)
     if a.linea:
@@ -449,6 +533,12 @@ def main(argv=None):
     if a.refrescar:
         refrescar()
         return 0
+    if a.fusionar_version:
+        token, repo = obtener_token(), os.environ.get("GITHUB_REPOSITORY")
+        if not token or not repo:
+            print("::error::--fusionar-version necesita GH_TOKEN y GITHUB_REPOSITORY", file=sys.stderr)
+            return 1
+        return fusionar_version(os.environ.get("PRS"), repo, token, os.environ.get("GITHUB_OUTPUT"))
     ahora = datetime.now(timezone.utc)
     token = obtener_token()
     if not token:

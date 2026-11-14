@@ -40,53 +40,32 @@ jobs:
         with:
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
+      # La fusión es `github_pendientes.py --fusionar-version` (con tests en scripts/tests), desde la rama
+      # principal de mariomina/.github, como agents-md.yml.
+      - uses: actions/checkout@v5
+        if: steps.rp.outputs.prs_created == 'true'
+        with:
+          repository: mariomina/.github
+          path: .mantenimiento
+          sparse-checkout: scripts/github_pendientes.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Fusionar la PR de versión
         id: fusion
         if: steps.rp.outputs.prs_created == 'true'
-        uses: actions/github-script@v9
         env:
+          GH_TOKEN: ${{ github.token }}
           PRS: ${{ steps.rp.outputs.prs }}
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            const noPermitido = e => e.status === 405 && /not allowed/i.test(e.message);
-            const espera = ms => new Promise(r => setTimeout(r, ms));
-            // Prueba los métodos que el repo permita; reintenta mientras GitHub calcula si es fusionable.
-            async function fusionar(numero) {
-              for (let intento = 1; ; intento++) {
-                let ultimo;
-                for (const merge_method of ['merge', 'squash', 'rebase']) {
-                  try {
-                    await github.rest.pulls.merge({ owner, repo, pull_number: numero, merge_method });
-                    return merge_method;
-                  } catch (e) {
-                    ultimo = e;
-                    if (!noPermitido(e)) break;
-                  }
-                }
-                const { data } = await github.rest.pulls.get({ owner, repo, pull_number: numero });
-                if (data.merged) return 'ya estaba fusionada';
-                if (intento === 4 || noPermitido(ultimo)) throw new Error(`#${numero}: ${ultimo.message}`);
-                core.info(`#${numero}: ${ultimo.message}; reintento en 5 s`);
-                await espera(5000);
-              }
-            }
-            let fusionadas = 0;
-            for (const pr of JSON.parse(process.env.PRS || '[]')) {
-              core.info(`#${pr.number} fusionada (${await fusionar(pr.number)})`);
-              fusionadas++;
-            }
-            if (fusionadas) await espera(10000);  // release-please lee la PR fusionada por la API
-            core.setOutput('fusionadas', fusionadas);
+        run: python3 -I .mantenimiento/scripts/github_pendientes.py --fusionar-version
       - uses: googleapis/release-please-action@v4
         id: rp2
-        if: steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0'
+        if: ${{ !cancelled() && steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0' }}
         with:
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
           skip-github-pull-request: true
       - name: Comprobar que la versión se publicó
-        if: steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0' && steps.rp2.outputs.releases_created != 'true'
+        if: ${{ !cancelled() && steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0' && steps.rp2.outputs.releases_created != 'true' }}
         run: |
           echo "::error::Se fusionó la PR de versión, pero release-please no publicó la versión en la segunda pasada"
           exit 1

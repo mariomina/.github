@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: write  # keepalive: `enable` de los workflows programados
 
 concurrency:
   group: mantenimiento
@@ -25,6 +26,23 @@ jobs:
       - uses: actions/checkout@v5
         with:
           sparse-checkout: scripts
+      # GitHub desactiva los `schedule` de un repo público tras 60 días sin actividad, y un workflow
+      # desactivado no vuelve con ningún trigger. `enable` sobre un workflow activo reinicia ese contador.
+      # Si aun así se desactiva, `github_pendientes.py` lo avisa (workflow-desactivado) en la línea GitHub:.
+      - name: Mantener vivos los workflows programados
+        continue-on-error: true  # un fallo aquí no debe quitar el barrido de esta hora
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/actions/workflows"
+          for w in mantenimiento.yml proyectos.yml; do
+            estado=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "$api/$w" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')
+            # Solo un workflow activo: uno que Mario apagó a mano (disabled_manually) no se vuelve a encender.
+            if [ "$estado" = active ]; then
+              curl -fsS -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$api/$w/enable"
+            fi
+            echo "$w: $estado"
+          done
       - name: Fusionar lo que se fusiona solo y listar lo demás
         env:
           GH_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
