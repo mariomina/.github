@@ -4,7 +4,7 @@
 # and approve pull requests» en el repo (en la org ya está activado).
 # La PR de versión se fusiona sola (decisión de Mario, mariomina/2-cerebro#280): el merge con GITHUB_TOKEN
 # no dispara otro workflow, así que una segunda pasada de release-please publica la versión en esta misma
-# ejecución. Si la fusión falla, el job falla; el barrido de mantenimiento.yml la reintenta y lo avisa.
+# ejecución. Si la fusión falla, el job falla; el barrido de home-mario (mantenimiento.yml) la reintenta y lo avisa.
 name: release-please
 
 on:
