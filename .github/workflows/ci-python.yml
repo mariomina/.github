@@ -1,0 +1,43 @@
+# Workflow reutilizable: CI de Python con uv.
+# Si el repo no tiene pyproject.toml, solo comprueba que no quedan marcas de conflicto.
+name: ci-python
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        type: string
+        default: "3.12"
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Sin marcas de conflicto
+        run: |
+          if git grep -nE '^(<<<<<<<|>>>>>>>) ' -- . ':!*.lock'; then
+            echo "::error::Quedan marcas de conflicto"; exit 1
+          fi
+      - name: Detectar Python
+        id: py
+        run: |
+          if [ -f pyproject.toml ]; then echo "hay=true" >> "$GITHUB_OUTPUT"; else echo "hay=false" >> "$GITHUB_OUTPUT"; fi
+      - uses: astral-sh/setup-uv@v6
+        if: steps.py.outputs.hay == 'true'
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Instalar
+        if: steps.py.outputs.hay == 'true'
+        run: uv sync --all-extras --dev
+      - name: Lint
+        if: steps.py.outputs.hay == 'true'
+        run: uvx ruff check .
+      - name: Tests
+        if: steps.py.outputs.hay == 'true'
+        run: |
+          if [ -d tests ]; then uv run --with pytest pytest -q; else echo "Sin carpeta tests/"; fi

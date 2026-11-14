@@ -1,0 +1,23 @@
+name: Tarea
+description: Trabajo concreto que cabe en una rama y una PR.
+body:
+  - type: textarea
+    id: resultado
+    attributes:
+      label: Resultado
+      description: ¿Qué debe existir al terminar?
+    validations:
+      required: true
+  - type: textarea
+    id: contexto
+    attributes:
+      label: Contexto
+      description: Por qué existe y de qué depende (épica, otro issue).
+  - type: textarea
+    id: checklist
+    attributes:
+      label: Checklist
+      value: |
+        - [ ] 
+    validations:
+      required: true

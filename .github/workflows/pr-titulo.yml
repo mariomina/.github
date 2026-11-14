@@ -1,0 +1,31 @@
+# Workflow reutilizable: el título de la PR sigue Conventional Commits.
+name: pr-titulo
+
+on:
+  workflow_call:
+
+permissions:
+  pull-requests: read
+
+jobs:
+  pr-titulo:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            chore
+            refactor
+            test
+            ci
+            perf
+            build
+            revert
+            experiment
+          requireScope: false

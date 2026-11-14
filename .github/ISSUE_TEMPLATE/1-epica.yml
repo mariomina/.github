@@ -1,0 +1,25 @@
+name: Épica
+description: Objetivo grande que se divide en sub-issues.
+title: "[Épica] "
+body:
+  - type: textarea
+    id: objetivo
+    attributes:
+      label: Objetivo
+      description: ¿Qué resultado debe lograr y para quién?
+    validations:
+      required: true
+  - type: textarea
+    id: alcance
+    attributes:
+      label: Alcance
+      description: Qué incluye y qué no.
+    validations:
+      required: true
+  - type: textarea
+    id: hecho
+    attributes:
+      label: Hecho cuando
+      description: Condiciones verificables para cerrarla. Las tareas van como sub-issues.
+    validations:
+      required: true

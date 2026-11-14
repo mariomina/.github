@@ -1,0 +1,23 @@
+name: Mejora
+description: Capacidad nueva o mejora de una existente.
+body:
+  - type: textarea
+    id: problema
+    attributes:
+      label: Problema
+      description: Quién tiene el problema y qué desea conseguir.
+    validations:
+      required: true
+  - type: textarea
+    id: propuesta
+    attributes:
+      label: Propuesta
+    validations:
+      required: true
+  - type: textarea
+    id: aceptacion
+    attributes:
+      label: Criterios de aceptación
+      description: Qué debe ser cierto para darla por terminada.
+    validations:
+      required: true
