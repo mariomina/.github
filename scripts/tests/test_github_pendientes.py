@@ -191,7 +191,8 @@ class Fusion(unittest.TestCase):
         salida = io.StringIO()
         with mock.patch.object(gp, "obtener_token", return_value="t"), \
                 mock.patch.object(gp, "recoger", return_value=estado), mock.patch.object(gp, "http", http), \
-                mock.patch.object(gp, "guardar_cache") as guardar, mock.patch("sys.stdout", salida):
+                mock.patch.object(gp, "guardar_cache") as guardar, mock.patch("sys.stdout", salida), \
+                mock.patch.dict("os.environ", {"GITHUB_ACTIONS": ""}):  # en Actions, main no escribe la caché
             self.assertEqual(gp.main(["--fusionar"]), 1)
         acc = {(p["repo"], p["numero"]): p["accion"] for p in guardar.call_args.args[0]["prs"]}
         self.assertEqual(acc, {("o/a", 3): "fusionar", ("o/b", 2): "fusionada"})
