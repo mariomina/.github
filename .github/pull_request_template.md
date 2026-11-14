@@ -14,7 +14,7 @@ Closes #
 - [ ] CI en verde
 - [ ] Docs actualizados si hacía falta
 
-## Prueba
+## Proof
 
 ```text
 

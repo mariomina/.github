@@ -1,0 +1,25 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release-please:
+    uses: ./.github/workflows/release-please.yml
+  # Los repos llaman a los reutilizables con @v<major>: el tag mayor se mueve a cada release.
+  tag-mayor:
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: ubuntu-slim
+    steps:
+      - uses: actions/checkout@v5
+      - name: Mover v<major>
+        run: |
+          git tag -f "v${{ needs.release-please.outputs.major }}"
+          git push -f origin "v${{ needs.release-please.outputs.major }}"

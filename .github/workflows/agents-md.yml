@@ -1,0 +1,28 @@
+# Workflow reutilizable: el AGENTS.md del repo cumple el filtro global (mariomina/2-cerebro#276).
+# Comprueba que existe, que declara tipo-repo y que no exceptúa reglas globales.
+# Los duplicados frente a home-mario los revisa el CI de home-mario (necesita leer repos privados).
+name: agents-md
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  agents-md:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: AGENTS.md
+          sparse-checkout-cone-mode: false
+      - uses: actions/checkout@v5
+        with:
+          repository: mariomina/.github
+          path: .filtro
+          sparse-checkout: scripts/filtro_global.py
+          sparse-checkout-cone-mode: false
+      - name: Filtro global (modo repo)
+        run: python3 -I .filtro/scripts/filtro_global.py --repo .
