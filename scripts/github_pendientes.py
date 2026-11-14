@@ -9,6 +9,9 @@ Decisiones de Mario (mariomina/2-cerebro#280):
     con ningún trigger: el aviso da el `gh workflow enable` que lo recupera), CI rojo en la rama principal,
     ramas sin PR y PR de más de 7 días, issues abiertos sin proyecto.
 
+Log público: en Actions, si el repo que lo ejecuta no es privado, solo imprime cuentas (sin repos, PR,
+ramas ni títulos). El barrido programado vive en home-mario (privado) por eso.
+
 Repos: home-mario y los punteros de su AGENTS.md, en cascada por los home repos (`punteros` de
 filtro_global.py). Cada AGENTS.md se lee por la API (rama principal): un clon local puede estar atrasado.
 
@@ -283,26 +286,27 @@ def _motivo(x):
         x.close()
 
 
-def fusionar(estado, token):
-    """Fusiona las PR con acción `fusionar` (con el sha revisado). Un error no corta las demás."""
+def fusionar(estado, token, discreto=False):
+    """Fusiona las PR con acción `fusionar` (con el sha revisado). Un error no corta las demás.
+    `discreto`: el log no nombra repos, PR ni títulos (log público)."""
     hechas, errores = [], []
     for e in [p for p in estado["prs"] if p["accion"] == "fusionar"]:
-        etiqueta = f"{e['repo']}#{e['numero']}"
+        etiqueta = "una PR" if discreto else f"{e['repo']}#{e['numero']}"
         try:
             http("PUT", f"{API}/repos/{e['repo']}/pulls/{e['numero']}/merge", token,
                  {"merge_method": e.get("metodo") or "merge", "sha": e["sha"]})
         except urllib.error.HTTPError as x:
             motivo = _motivo(x)
             errores.append({"repo": e["repo"], "detalle": f"#{e['numero']}: HTTP {x.code} {motivo}".strip()})
-            print(f"Error al fusionar {etiqueta}: HTTP {x.code} {motivo}")
+            print(f"Error al fusionar {etiqueta}: HTTP {x.code}" + ("" if discreto else f" {motivo}"))
             continue
         except (urllib.error.URLError, OSError) as x:
             errores.append({"repo": e["repo"], "detalle": f"#{e['numero']}: {x}"})
-            print(f"Error al fusionar {etiqueta}: {x}")
+            print(f"Error al fusionar {etiqueta}: {type(x).__name__ if discreto else x}")
             continue
         e["accion"] = "fusionada"
         hechas.append(e)
-        print(f"Fusionada {etiqueta} ({e['clase']}): {e['titulo']}")
+        print(f"Fusionada {etiqueta} ({e['clase']})" + ("" if discreto else f": {e['titulo']}"))
     estado["errores"] = estado.get("errores", []) + errores
     return hechas, errores
 
@@ -356,6 +360,27 @@ def fusionar_version(prs, repo, token, salida=None, esperar=None):
             with open(salida, "a", encoding="utf-8") as f:
                 f.write(f"fusionadas={fusionadas}\n")
     return 1 if fallos else 0
+
+
+def log_publico(token):
+    """True si corre en Actions en un repo que no consta como privado: cualquiera lee sus logs, así que
+    no se imprimen repos, PR, ramas ni títulos (mariomina/2-cerebro#280: el barrido vive en home-mario)."""
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not os.environ.get("GITHUB_ACTIONS") or not repo:
+        return False
+    try:
+        return not http("GET", f"{API}/repos/{repo}", token).get("private")
+    except (OSError, ValueError):
+        return True  # sin saberlo, se trata como público
+
+
+def cuentas(estado):
+    """Resumen sin nombres para un log público."""
+    prs = estado.get("prs", [])
+    n = lambda *acciones: sum(p["accion"] in acciones for p in prs)  # noqa: E731
+    return (f"GitHub: {n('fusionada')} fusionadas · {n('decision')} esperan decisión · "
+            f"{n('fusionar', 'esperar')} se fusionan solas · {len(estado.get('avisos', []))} avisos · "
+            f"{len(estado.get('errores', []))} errores (log público: sin detalle)\n")
 
 
 # --- salidas ------------------------------------------------------------------------
@@ -544,17 +569,21 @@ def main(argv=None):
     if not token:
         print("github_pendientes: sin token (GH_TOKEN, GITHUB_TOKEN o `gh auth login`)", file=sys.stderr)
         return 1
+    discreto = log_publico(token)
     try:
         estado = recoger(token, ahora)
     except (Fallo, OSError, ValueError) as e:  # OSError cubre URLError, timeouts y conexiones cortadas
-        print(f"github_pendientes: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"github_pendientes: {type(e).__name__}" + ("" if discreto else f": {e}"), file=sys.stderr)
         return 1
     errores = []
-    if a.fusionar:
-        _, errores = fusionar(estado, token)  # las fusionadas siguen en la tabla y la caché como `fusionada`
+    if a.fusionar:  # las fusionadas siguen en la tabla y la caché como `fusionada`
+        _, errores = fusionar(estado, token, discreto)
     if not os.environ.get("GITHUB_ACTIONS"):
         guardar_cache(estado)
-    sys.stdout.write(json.dumps(estado, ensure_ascii=False, indent=2) + "\n" if a.json else tabla(estado, ahora))
+    if discreto:
+        sys.stdout.write(cuentas(estado))
+    else:
+        sys.stdout.write(json.dumps(estado, ensure_ascii=False, indent=2) + "\n" if a.json else tabla(estado, ahora))
     return 1 if errores else 0
 
 

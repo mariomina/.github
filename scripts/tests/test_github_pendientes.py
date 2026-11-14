@@ -380,5 +380,62 @@ class FusionarVersion(unittest.TestCase):
             self.assertEqual(gp.main(["--fusionar-version"]), 1)
 
 
+class LogPublico(unittest.TestCase):
+    def test_solo_en_actions_y_si_el_repo_no_es_privado(self):
+        def http_privado(privado):
+            return lambda metodo, url, token, cuerpo=None: {"private": privado}
+
+        with mock.patch.dict("os.environ", {"GITHUB_ACTIONS": "", "GITHUB_REPOSITORY": "o/r"}):
+            self.assertFalse(gp.log_publico("t"))
+        with mock.patch.dict("os.environ", {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": "o/r"}):
+            with mock.patch.object(gp, "http", http_privado(True)):
+                self.assertFalse(gp.log_publico("t"))
+            with mock.patch.object(gp, "http", http_privado(False)):
+                self.assertTrue(gp.log_publico("t"))
+            with mock.patch.object(gp, "http", side_effect=urllib.error.URLError("dns")):
+                self.assertTrue(gp.log_publico("t"))  # sin saberlo, público
+
+    def test_main_fusionar_en_log_publico_no_nombra_repos_ni_titulos(self):
+        nodos = {"o/secreto": repo([pr(2, "chore: release cliente-acme", "release-please--branches--main",
+                                       "github-actions", edad=timedelta(hours=2))],
+                                   issues=[(7, 0)], ramas=[("feat/cliente-acme", timedelta(days=30))]),
+                 "o/otro": repo([dependabot(3, "5", "7")])}
+        estado = gp.analizar(nodos, [], AHORA)
+        salida = io.StringIO()
+        with mock.patch.object(gp, "obtener_token", return_value="t"), \
+                mock.patch.object(gp, "recoger", return_value=estado), \
+                mock.patch.object(gp, "log_publico", return_value=True), \
+                mock.patch.object(gp, "http", return_value={"merged": True}), \
+                mock.patch.dict("os.environ", {"GITHUB_ACTIONS": "true"}), mock.patch("sys.stdout", salida):
+            self.assertEqual(gp.main(["--fusionar"]), 0)
+        texto = salida.getvalue()
+        for prohibido in ("o/secreto", "o/otro", "acme", "#2", "#3", "#7", "Bump"):
+            self.assertNotIn(prohibido, texto)
+        self.assertIn("1 fusionadas · 1 esperan decisión", texto)
+
+    def test_fusionar_discreto_no_nombra_la_pr_ni_el_motivo_del_error(self):
+        estado = gp.analizar({"o/secreto": repo([dependabot(3, "5.1", "5.2"), dependabot(4, "5.1", "5.3")])},
+                             [], AHORA)
+        respuestas = [urllib.error.HTTPError("u", 409, "x", {}, io.BytesIO(b'{"message": "rama cliente-acme"}')),
+                      urllib.error.URLError("conexión a o/secreto")]
+
+        def http(metodo, url, token, cuerpo=None):
+            raise respuestas.pop(0)
+
+        salida = io.StringIO()
+        with mock.patch.object(gp, "http", http), mock.patch("sys.stdout", salida):
+            gp.fusionar(estado, "t", discreto=True)
+        self.assertEqual(salida.getvalue(), "Error al fusionar una PR: HTTP 409\nError al fusionar una PR: URLError\n")
+
+    def test_error_de_recoger_en_log_publico_solo_da_el_tipo(self):
+        error = io.StringIO()
+        with mock.patch.object(gp, "obtener_token", return_value="t"), \
+                mock.patch.object(gp, "log_publico", return_value=True), \
+                mock.patch.object(gp, "recoger", side_effect=gp.Fallo("no se puede leer o/secreto")), \
+                mock.patch("sys.stderr", error):
+            self.assertEqual(gp.main([]), 1)
+        self.assertEqual(error.getvalue(), "github_pendientes: Fallo\n")
+
+
 if __name__ == "__main__":
     unittest.main()

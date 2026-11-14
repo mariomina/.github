@@ -30,7 +30,7 @@ def gql(query, **variables):
 
 
 PROYECTOS = """query($login:String!){ repositoryOwner(login:$login){ ... on ProjectV2Owner { projectsV2(first:50){ nodes{
-  id title closed template
+  id number title closed template
   field(name:"Status"){ ... on ProjectV2SingleSelectField{ id options{ id name } } }
   repositories(first:50){ nodes{ nameWithOwner } } } } } } }"""
 
@@ -55,10 +55,16 @@ def paginar(query, ruta, **v):
         after = d["pageInfo"]["endCursor"]
 
 
+def _nombre(p):
+    """Título del proyecto; en Actions, solo su número: el log de este repo es público y un proyecto
+    «Cliente — <slug>» nombraría al cliente."""
+    return f"proyecto {p.get('number', '?')}" if os.environ.get("GITHUB_ACTIONS") else p["title"]
+
+
 def sincronizar(p, dry):
     st = p["field"]
     if not st or not st["options"]:
-        return f"  {p['title']}: sin campo Status, se salta"
+        return f"  {_nombre(p)}: sin campo Status, se salta"
     primera, ultima = st["options"][0], st["options"][-1]
     items = list(paginar(ITEMS, ["node", "items"], id=p["id"]))
     en_proyecto = {i["content"]["id"] for i in items if i.get("content") and i["content"].get("id")}
@@ -97,7 +103,7 @@ def sincronizar(p, dry):
                 archivados += 1
                 if not dry:
                     gql("mutation($p:ID!,$i:ID!){archiveProjectV2Item(input:{projectId:$p,itemId:$i}){item{id}}}", p=p["id"], i=i["id"])
-    return (f"  {p['title']}: +{añadidos} añadidos · {nuevos} → {primera['name']} · "
+    return (f"  {_nombre(p)}: +{añadidos} añadidos · {nuevos} → {primera['name']} · "
             f"{cerrados} → {ultima['name']} · {archivados} archivados")
 
 
@@ -113,4 +119,10 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    try:
+        main(sys.argv[1:])
+    except Exception as e:  # noqa: BLE001
+        if not os.environ.get("GITHUB_ACTIONS"):
+            raise
+        # El log de este repo es público: el detalle (errores de GraphQL) puede nombrar repos o issues privados.
+        sys.exit(f"proyectos_sync: {type(e).__name__} (detalle: ejecutarlo en local con --dry-run)")
