@@ -2,6 +2,9 @@
 # El repo que lo llama tiene release-please-config.json y .release-please-manifest.json en su raíz
 # (componentes, changelog-sections y archivos de versión). Necesita «Allow GitHub Actions to create
 # and approve pull requests» en el repo (en la org ya está activado).
+# La PR de versión se fusiona sola (decisión de Mario, mariomina/2-cerebro#280): el merge con GITHUB_TOKEN
+# no dispara otro workflow, así que una segunda pasada de release-please publica la versión en esta misma
+# ejecución. Si la fusión falla, el job falla; el barrido de mantenimiento.yml la reintenta y lo avisa.
 name: release-please
 
 on:
@@ -27,13 +30,58 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-slim
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
-      releases_created: ${{ steps.rp.outputs.releases_created }}
-      major: ${{ steps.rp.outputs.major }}
+      releases_created: ${{ steps.rp.outputs.releases_created == 'true' || steps.rp2.outputs.releases_created == 'true' }}
+      major: ${{ steps.rp2.outputs.major || steps.rp.outputs.major }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: rp
         with:
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
+      - name: Fusionar la PR de versión
+        id: fusion
+        if: steps.rp.outputs.prs_created == 'true'
+        uses: actions/github-script@v9
+        env:
+          PRS: ${{ steps.rp.outputs.prs }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const noPermitido = e => e.status === 405 && /not allowed/i.test(e.message);
+            const espera = ms => new Promise(r => setTimeout(r, ms));
+            // Prueba los métodos que el repo permita; reintenta mientras GitHub calcula si es fusionable.
+            async function fusionar(numero) {
+              for (let intento = 1; ; intento++) {
+                let ultimo;
+                for (const merge_method of ['merge', 'squash', 'rebase']) {
+                  try {
+                    await github.rest.pulls.merge({ owner, repo, pull_number: numero, merge_method });
+                    return merge_method;
+                  } catch (e) {
+                    ultimo = e;
+                    if (!noPermitido(e)) break;
+                  }
+                }
+                const { data } = await github.rest.pulls.get({ owner, repo, pull_number: numero });
+                if (data.merged) return 'ya estaba fusionada';
+                if (intento === 4 || noPermitido(ultimo)) throw new Error(`#${numero}: ${ultimo.message}`);
+                core.info(`#${numero}: ${ultimo.message}; reintento en 5 s`);
+                await espera(5000);
+              }
+            }
+            let fusionadas = 0;
+            for (const pr of JSON.parse(process.env.PRS || '[]')) {
+              core.info(`#${pr.number} fusionada (${await fusionar(pr.number)})`);
+              fusionadas++;
+            }
+            if (fusionadas) await espera(10000);  // release-please lee la PR fusionada por la API
+            core.setOutput('fusionadas', fusionadas);
+      - uses: googleapis/release-please-action@v4
+        id: rp2
+        if: steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0'
+        with:
+          config-file: ${{ inputs.config-file }}
+          manifest-file: ${{ inputs.manifest-file }}
+          skip-github-pull-request: true
