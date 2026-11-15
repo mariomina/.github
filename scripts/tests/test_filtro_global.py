@@ -81,6 +81,16 @@ class FiltroGlobal(unittest.TestCase):
         self.repo("a", "# a\n\ntipo-repo: libreria\n")
         self.assertEqual(self.reglas(self.correr()), [("o/a", "sin-tipo-repo")])
 
+    def test_agente_fuera_de_proyectos(self):
+        """home-mario#8: un agente guardado como repo (tipo `agente`) en `~/.hermes`, fuera de Proyectos."""
+        self.repo("home-mario", home_md([]) + "- **hermes-mario**: `~/.hermes`. Si falta: "
+                                              "`git clone git@github.com:o/hermes-mario.git ~/.hermes`.\n")
+        (self.casa / ".hermes").mkdir()
+        (self.casa / ".hermes" / "AGENTS.md").write_text("# h\n\ntipo-repo: agente\n", encoding="utf-8")
+        r = self.correr()
+        self.assertTrue(r["valido"], r["violaciones"])
+        self.assertEqual(r["repos"], [{"repo": "o/hermes-mario", "tipo": "agente"}])
+
     def test_cascada_por_home_hijo(self):
         self.repo("home-mario", home_md(["agencia"]))
         self.repo("agencia", home_md(["cliente-x"]).replace("# home", "# agencia"))
