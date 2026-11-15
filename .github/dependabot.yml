@@ -4,6 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Una versión nueva espera 7 días antes de proponerse: una versión comprometida suele detectarse y
+    # retirarse antes. El barrido fusiona solo las de parche o menor (mariomina/2-cerebro#280).
+    cooldown:
+      default-days: 7
     labels: ["area/ci"]
+    # fix(deps) y no chore: chore no publica versión, y los repos que llaman con @v1 se quedarían con el SHA viejo.
     commit-message:
-      prefix: chore
+      prefix: fix
+      include: scope

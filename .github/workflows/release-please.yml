@@ -35,14 +35,14 @@ jobs:
       releases_created: ${{ steps.rp.outputs.releases_created == 'true' || steps.rp2.outputs.releases_created == 'true' }}
       major: ${{ steps.rp2.outputs.major || steps.rp.outputs.major }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         id: rp
         with:
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
       # La fusión es `github_pendientes.py --fusionar-version` (con tests en scripts/tests), desde la rama
       # principal de mariomina/.github, como agents-md.yml.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         if: steps.rp.outputs.prs_created == 'true'
         with:
           repository: mariomina/.github
@@ -57,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PRS: ${{ steps.rp.outputs.prs }}
         run: python3 -I .mantenimiento/scripts/github_pendientes.py --fusionar-version
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         id: rp2
         if: ${{ !cancelled() && steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0' }}
         with:
