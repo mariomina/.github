@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/mariomina/.github/compare/v1.3.2...v1.4.0) (2026-11-15)
+
+
+### Novedades
+
+* **filtro:** tipo de repo agente y punteros fuera de ~/Documentos/Proyectos ([182d682](https://github.com/mariomina/.github/commit/182d68272dcf7a29021b2f97d8808d197ab7ccc0))
+* **filtro:** tipo de repo agente y punteros fuera de ~/Documentos/Proyectos ([#19](https://github.com/mariomina/.github/issues/19)) ([dfa7c4e](https://github.com/mariomina/.github/commit/dfa7c4ed3a4ca7e44b49a797079d89eb757c147d))
+
 ## [1.3.2](https://github.com/mariomina/.github/compare/v1.3.1...v1.3.2) (2026-11-15)
 
 
