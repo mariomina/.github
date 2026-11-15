@@ -25,13 +25,13 @@ import sys
 import urllib.request
 from pathlib import Path
 
-TIPOS = {"vault", "producto", "cliente", "web", "home"}
+TIPOS = {"vault", "producto", "cliente", "web", "home", "agente"}
 PROYECTOS = Path.home() / "Documentos" / "Proyectos"
 IGNORAR_DIRS = {"worktrees"}
 SIMILITUD = 0.9          # dos líneas con ratio >= 0.9 cuentan como la misma regla
 MIN_REGLA = 40           # una regla más corta no se compara (evita falsos positivos)
 RE_TIPO = re.compile(r"^\s*tipo-repo:\s*([a-z-]+)\s*$", re.M)
-RE_RUTA = re.compile(r"`(~/Documentos/Proyectos/[^`]+)`")
+RE_RUTA = re.compile(r"`(~/[^`]+)`")   # ruta local del repo: cualquiera bajo ~ (p. ej. ~/.hermes)
 RE_CLONE = re.compile(r"git@github\.com:([\w.-]+/[\w.-]+?)\.git")
 RE_EXCEPCION = re.compile(
     r"(excepci[oó]n|no aplica|salvo|se ignora|ignora|no rige)[^.\n]{0,80}(regla(s)? global(es)?|home-mario)",
