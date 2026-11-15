@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.2](https://github.com/mariomina/.github/compare/v1.3.1...v1.3.2) (2026-11-15)
+
+
+### Correcciones
+
+* acciones externas fijadas por SHA completo ([087d460](https://github.com/mariomina/.github/commit/087d460e5cc1940c82607cc880d254459e8cbe38))
+* acciones externas por SHA, Dependabot con cooldown y versión ([9409530](https://github.com/mariomina/.github/commit/940953070bad17033ef6b2fa30f808c2841bb4c5))
+* Dependabot espera 7 días y publica versión; test de acciones por SHA ([a3a9896](https://github.com/mariomina/.github/commit/a3a9896854458c2f2bab49521312cf493a16f85b))
+
 ## [1.3.1](https://github.com/mariomina/.github/compare/v1.3.0...v1.3.1) (2026-11-14)
 
 
