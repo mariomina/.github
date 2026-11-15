@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/mariomina/.github/compare/v1.4.1...v1.4.2) (2026-11-15)
+
+
+### Correcciones
+
+* **deps:** Bump actions/checkout from 5.1.0 to 7.0.1 ([d74751f](https://github.com/mariomina/.github/commit/d74751f51d1e220bf58fac7ee65ff05dc4534469))
+
 ## [1.4.1](https://github.com/mariomina/.github/compare/v1.4.0...v1.4.1) (2026-11-15)
 
 
