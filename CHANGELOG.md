@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.1](https://github.com/mariomina/.github/compare/v1.4.0...v1.4.1) (2026-11-15)
+
+
+### Correcciones
+
+* **deps:** Bump amannn/action-semantic-pull-request from 5.5.3 to 6.1.2 ([8ccc7c2](https://github.com/mariomina/.github/commit/8ccc7c269255a390558f9b58ad89ffcd29d957fb))
+* **deps:** Bump astral-sh/setup-uv from 6.8.0 to 10.3.3 ([1c0dcb5](https://github.com/mariomina/.github/commit/1c0dcb546403e016bc0772f2047832f3a9676842))
+* **deps:** Bump googleapis/release-please-action from 4.4.1 to 5.0.0 ([e1b68ce](https://github.com/mariomina/.github/commit/e1b68ce66decc8e448787db8b0a0d15970d1aa16))
+
 ## [1.4.0](https://github.com/mariomina/.github/compare/v1.3.2...v1.4.0) (2026-11-15)
 
 
