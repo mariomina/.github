@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.2](https://github.com/mariomina/.github/compare/v1.6.1...v1.6.2) (2026-11-16)
+
+
+### Correcciones
+
+* **release-please:** la PR de versión se crea con la GitHub App y se fusiona solo con CI en verde ([4e936b5](https://github.com/mariomina/.github/commit/4e936b5b574dc9d51489d41b15b2d532e101bf1d)), closes [#28](https://github.com/mariomina/.github/issues/28)
+* **release-please:** PR de versión con la GitHub App, fusión solo con CI en verde ([0f3a448](https://github.com/mariomina/.github/commit/0f3a44867b3829ed729fe36c16a76f60f0f7092b))
+
 ## [1.6.1](https://github.com/mariomina/.github/compare/v1.6.0...v1.6.1) (2026-11-16)
 
 
