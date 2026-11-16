@@ -76,6 +76,14 @@ class FiltroGlobal(unittest.TestCase):
         self.repo("b", "# b\n\nSin tipo.\n")
         self.assertEqual(self.reglas(self.correr()), [("o/a", "sin-agents-md"), ("o/b", "sin-tipo-repo")])
 
+    def test_autonomia(self):
+        self.repo("mario-home", home_md(["a", "b", "c", "d"]).replace("tipo-repo: home", "tipo-repo: home\nautonomia: 1"))
+        self.repo("a", "# a\n\ntipo-repo: producto\nautonomia: 2\n")
+        self.repo("b", "# b\n\ntipo-repo: producto\nautonomia: alta\n")
+        self.repo("c", "# c\n\ntipo-repo: producto\n")
+        self.repo("d", "# d\n\ntipo-repo: home\nautonomia: 0\n")
+        self.assertEqual(self.reglas(self.correr()), [("mario-home", "autonomia-fija-en-0"), ("o/b", "autonomia-invalida")])
+
     def test_tipo_desconocido(self):
         self.repo("mario-home", home_md(["a"]))
         self.repo("a", "# a\n\ntipo-repo: libreria\n")
