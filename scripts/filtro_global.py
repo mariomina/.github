@@ -12,7 +12,8 @@ Modos:
                           GH_TOKEN_ESCALA_AGENCIA) manda sobre GH_TOKEN en los repos de ese dueño.
   --repo RUTA             Solo la estructura de un repo: AGENTS.md, tipo-repo y excepciones (PR de cada repo).
 
-Violaciones (salida 1): repo apuntado sin AGENTS.md o sin tipo-repo válido; regla global repetida
+Violaciones (salida 1): repo apuntado sin AGENTS.md o sin tipo-repo válido; `autonomia: N` fuera de 0–2, o
+distinto de 0 en un home repo o en .github (mariomina/mario-home#19; sin declarar, de momento pasa); regla global repetida
 en un repo; repo que declara una excepción a una regla global.
 Avisos (salida 0): repo con git en ~/Documentos/Mario (o en una carpeta de grupo sin git, como
 mario-agencia/) que no está en ningún puntero.
@@ -34,6 +35,8 @@ IGNORAR_DIRS = {"worktrees"}
 SIMILITUD = 0.9          # dos líneas con ratio >= 0.9 cuentan como la misma regla
 MIN_REGLA = 40           # una regla más corta no se compara (evita falsos positivos)
 RE_TIPO = re.compile(r"^\s*tipo-repo:\s*([a-z-]+)\s*$", re.M)
+RE_AUTONOMIA = re.compile(r"^\s*autonomia:\s*(\S*)\s*$", re.M)  # mariomina/mario-home#19
+NIVELES = {"0", "1", "2"}
 RE_RUTA = re.compile(r"`(~/[^`]+)`")   # ruta local del repo: cualquiera bajo ~ (p. ej. ~/.hermes)
 RE_CLONE = re.compile(r"git@github\.com:([\w.-]+/[\w.-]+?)\.git")
 RE_EXCEPCION = re.compile(
@@ -104,6 +107,14 @@ def revisar_estructura(nombre, texto, violaciones):
     if not tipo or tipo.group(1) not in TIPOS:
         violaciones.append({"repo": nombre, "regla": "sin-tipo-repo",
                             "detalle": f"falta «tipo-repo: <{'|'.join(sorted(TIPOS))}>»"})
+    autonomia = RE_AUTONOMIA.search(texto)
+    if autonomia and autonomia.group(1) not in NIVELES:
+        violaciones.append({"repo": nombre, "regla": "autonomia-invalida",
+                            "detalle": f"«autonomia: {autonomia.group(1)}»: el nivel es 0, 1 o 2"})
+    elif autonomia and autonomia.group(1) != "0" and ((tipo and tipo.group(1) == "home")
+                                                      or nombre.rstrip("/").endswith("/.github")):
+        violaciones.append({"repo": nombre, "regla": "autonomia-fija-en-0",
+                            "detalle": "los home repos y .github fijan las reglas: su nivel es siempre 0"})
     for n, linea in enumerate(texto.splitlines(), 1):
         if RE_EXCEPCION.search(linea):
             violaciones.append({"repo": nombre, "regla": "excepcion-a-global", "linea": n,
