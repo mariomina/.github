@@ -1,4 +1,4 @@
-"""Tests de github_pendientes.py (mariomina/2-cerebro#280), sin red. Ejecutar: python3 -m unittest discover -s scripts/tests"""
+"""Tests de github_pendientes.py (mariomina/mario-2-cerebro#280), sin red. Ejecutar: python3 -m unittest discover -s scripts/tests"""
 import importlib.util
 import io
 import json
@@ -106,9 +106,9 @@ class Clasificacion(unittest.TestCase):
         self.assertEqual(tipos([None, None]), [])
 
     def test_las_9_prs_de_hoy(self):
-        version = [("mariomina/home-mario", 1, "main"), ("mariomina/2-cerebro", 278, "master--components--sistema"),
-                   ("mariomina/2-cerebro", 279, "master--components--pkm"), ("mariomina/copy-os", 16, "main"),
-                   ("Escala-Agencia/web", 2, "main")]
+        version = [("mariomina/mario-home", 1, "main"), ("mariomina/mario-2-cerebro", 278, "master--components--sistema"),
+                   ("mariomina/mario-2-cerebro", 279, "master--components--pkm"), ("mariomina/mario-copy-os", 16, "main"),
+                   ("Escala-Agencia/agencia-web", 2, "main")]
         nodos = {}
         for r, n, rama in version:
             nodos.setdefault(r, repo())["pullRequests"]["nodes"].append(
@@ -139,13 +139,13 @@ class Repos(unittest.TestCase):
         filtro = gp.cargar_filtro()
         textos = {
             gp.HOME_REPO: "tipo-repo: home\n\n## Otros repos\n\n"
-                          "- **a**: `~/Documentos/Proyectos/a`. `git clone git@github.com:o/a.git`.\n"
-                          "- **ag**: `~/Documentos/Proyectos/ag`. `git clone git@github.com:e/ag.git`.\n"
-                          "- **x**: `~/Documentos/Proyectos/x-<slug>`.\n",
+                          "- **a**: `~/Documentos/Mario/a`. `git clone git@github.com:o/a.git`.\n"
+                          "- **ag**: `~/Documentos/Mario/ag`. `git clone git@github.com:e/ag.git`.\n"
+                          "- **x**: `~/Documentos/Mario/x-<slug>`.\n",
             "o/a": "tipo-repo: producto\n",
             "e/ag": "tipo-repo: home\n\n## Otros repos\n\n"
-                    "- **w**: `~/Documentos/Proyectos/w`. `git clone git@github.com:e/w.git`.\n"
-                    "- **a**: `~/Documentos/Proyectos/a`. `git clone git@github.com:o/a.git`.\n",
+                    "- **w**: `~/Documentos/Mario/w`. `git clone git@github.com:e/w.git`.\n"
+                    "- **a**: `~/Documentos/Mario/a`. `git clone git@github.com:o/a.git`.\n",
         }
         with mock.patch.object(filtro, "leer_remoto", side_effect=textos.get):
             self.assertEqual(gp.repos(filtro), [gp.HOME_REPO, "o/a", "e/ag", "e/w"])
@@ -240,7 +240,7 @@ class Linea(unittest.TestCase):
 
     def test_decisiones_y_cache_caducada(self):
         nodos = {"mariomina/.github": repo([dependabot(1, "6", "7"), dependabot(2, "4", "5")]),
-                 "Escala-Agencia/web": repo([pr(2, "chore: release", "release-please--branches--main",
+                 "Escala-Agencia/agencia-web": repo([pr(2, "chore: release", "release-please--branches--main",
                                                "github-actions")])}
         gp.guardar_cache(gp.analizar(nodos, [], AHORA - timedelta(minutes=30)), self.cache)
         self.assertEqual(self.linea(), "GitHub: 2 esperan tu decisión: Dependabot mayor (.github#1, .github#2) · "

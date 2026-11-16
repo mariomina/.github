@@ -1,6 +1,6 @@
 """Pendientes de GitHub en los repos de Mario: qué se fusiona solo, qué espera su decisión y qué se avisa.
 
-Decisiones de Mario (mariomina/2-cerebro#280):
+Decisiones de Mario (mariomina/mario-2-cerebro#280):
   - PR de versión (release-please): se fusiona sola. La fusiona el job reutilizable; si sigue abierta
     tras 10 min sin cambios, la fusiona `--fusionar` con el token de Mario (eso dispara la versión).
   - Dependabot de parche o menor: se fusiona sola con CI en verde (statusCheckRollup = SUCCESS).
@@ -10,9 +10,9 @@ Decisiones de Mario (mariomina/2-cerebro#280):
     ramas sin PR y PR de más de 7 días, issues abiertos sin proyecto.
 
 Log público: en Actions, si el repo que lo ejecuta no es privado, solo imprime cuentas (sin repos, PR,
-ramas ni títulos). El barrido programado vive en home-mario (privado) por eso.
+ramas ni títulos). El barrido programado vive en mario-home (privado) por eso.
 
-Repos: home-mario y los punteros de su AGENTS.md, en cascada por los home repos (`punteros` de
+Repos: mario-home y los punteros de su AGENTS.md, en cascada por los home repos (`punteros` de
 filtro_global.py). Cada AGENTS.md se lee por la API (rama principal): un clon local puede estar atrasado.
 
 Uso (token: GH_TOKEN, GITHUB_TOKEN o `gh auth token`):
@@ -45,7 +45,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True  # cargar filtro_global.py no deja __pycache__ en scripts/
 
 API = "https://api.github.com"
-HOME_REPO = "mariomina/home-mario"
+HOME_REPO = "mariomina/mario-home"
 CACHE = Path.home() / ".cache" / "mariomina-github" / "pendientes.json"  # fija: la comparten Claudian y Hermes
 CADUCA = timedelta(minutes=10)      # caché más vieja: `--linea` la refresca en segundo plano
 BLOQUEO = timedelta(minutes=2)      # un refresco en curso no se lanza dos veces
@@ -108,7 +108,7 @@ def cargar_filtro():
 
 
 def repos(filtro):
-    """[owner/repo]: home-mario y sus punteros, en cascada por los repos `tipo-repo: home`."""
+    """[owner/repo]: mario-home y sus punteros, en cascada por los repos `tipo-repo: home`."""
     texto = filtro.leer_remoto(HOME_REPO)
     if texto is None:
         raise Fallo(f"no se puede leer el AGENTS.md de {HOME_REPO}")
@@ -364,7 +364,7 @@ def fusionar_version(prs, repo, token, salida=None, esperar=None):
 
 def log_publico(token):
     """True si corre en Actions en un repo que no consta como privado: cualquiera lee sus logs, así que
-    no se imprimen repos, PR, ramas ni títulos (mariomina/2-cerebro#280: el barrido vive en home-mario)."""
+    no se imprimen repos, PR, ramas ni títulos (mariomina/mario-2-cerebro#280: el barrido vive en mario-home)."""
     repo = os.environ.get("GITHUB_REPOSITORY")
     if not os.environ.get("GITHUB_ACTIONS") or not repo:
         return False

@@ -1,6 +1,6 @@
-# Workflow reutilizable: el AGENTS.md del repo cumple el filtro global (mariomina/2-cerebro#276).
+# Workflow reutilizable: el AGENTS.md del repo cumple el filtro global (mariomina/mario-2-cerebro#276).
 # Comprueba que existe, que declara tipo-repo y que no exceptúa reglas globales.
-# Los duplicados frente a home-mario los revisa el CI de home-mario (necesita leer repos privados).
+# Los duplicados frente a mario-home los revisa el CI de mario-home (necesita leer repos privados).
 name: agents-md
 
 on:
