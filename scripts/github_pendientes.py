@@ -221,8 +221,9 @@ def clasificar_pr(repo, pr, ahora):
     return e
 
 
-def analizar(nodos, errores, ahora):
-    """Estado completo desde las respuestas de GitHub: PR clasificadas, avisos y errores."""
+def analizar(nodos, errores, ahora, sin_proyectos=()):
+    """Estado completo desde las respuestas de GitHub: PR clasificadas, avisos y errores.
+    `sin_proyectos`: repos cuyo token no ve los Projects; sin aviso de issue sin proyecto (sería falso)."""
     prs, avisos = [], []
     for repo, n in nodos.items():
         if not n:
@@ -252,7 +253,7 @@ def analizar(nodos, errores, ahora):
             if ahora - _fecha(fecha) > VIEJA:
                 avisos.append({"repo": repo, "tipo": "rama-vieja",
                                "detalle": f"{ref['name']} (último commit {fecha[:10]}, sin PR)"})
-        for i in (n.get("issues") or {}).get("nodes") or []:
+        for i in [] if repo in sin_proyectos else (n.get("issues") or {}).get("nodes") or []:
             if not (i.get("projectItems") or {}).get("totalCount"):
                 avisos.append({"repo": repo, "tipo": "issue-sin-proyecto", "detalle": f"#{i['number']} {i['title']}",
                                "url": i.get("url")})
@@ -280,7 +281,9 @@ def recoger(token, ahora=None):
     os.environ["GH_TOKEN"] = token  # filtro_global.leer_remoto lo lee del entorno
     nombres = repos(cargar_filtro())
     nodos, errores = consultar(nombres, token)
-    estado = analizar(nodos, errores, ahora or datetime.now(timezone.utc))
+    # Un token de instalación de GitHub App (ghs_) no ve los Projects de una cuenta personal: totalCount sería 0.
+    ciegos = {n for n in nombres if token_de(n, token).startswith("ghs_")}
+    estado = analizar(nodos, errores, ahora or datetime.now(timezone.utc), ciegos)
     estado["avisos"] = workflows_desactivados(nombres, token) + estado["avisos"]
     return estado
 
