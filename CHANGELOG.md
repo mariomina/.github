@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/mariomina/.github/compare/v1.9.0...v1.10.0) (2026-11-16)
+
+
+### Novedades
+
+* solo squash: CONTRIBUTING y la automatización lo prefieren ([#43](https://github.com/mariomina/.github/issues/43)) ([361b15a](https://github.com/mariomina/.github/commit/361b15a0459b2859d9f2abf56b23f24228734428)), closes [#27](https://github.com/mariomina/.github/issues/27)
+
 ## [1.9.0](https://github.com/mariomina/.github/compare/v1.8.0...v1.9.0) (2026-11-16)
 
 
