@@ -2,6 +2,7 @@
 import importlib.util
 import io
 import json
+import re
 import tempfile
 import unittest
 import urllib.error
@@ -178,6 +179,15 @@ class Fusion(unittest.TestCase):
         self.assertEqual([(h["repo"], h["numero"]) for h in hechas], [("o/b", 2)])
         self.assertEqual(errores, [{"repo": "o/a", "detalle": "#3: HTTP 405 not mergeable"}])
 
+    def test_fusiona_con_el_token_del_dueno(self):
+        estado = gp.analizar({"Escala-Agencia/w": repo([dependabot(3, "5.1", "5.2")]),
+                              "o/a": repo([dependabot(4, "5.1", "5.2")])}, [], AHORA)
+        tokens = []
+        with mock.patch.object(gp, "http", lambda m, url, token, c=None: tokens.append((url.split("/")[5], token))), \
+                mock.patch.dict("os.environ", {"GH_TOKEN_ESCALA_AGENCIA": "te"}), mock.patch("builtins.print"):
+            gp.fusionar(estado, "t")
+        self.assertEqual(tokens, [("w", "te"), ("a", "t")])
+
     def test_main_fusionar_registra_las_fusionadas_y_sale_con_1_si_alguna_falla(self):
         nodos = {"o/a": repo([dependabot(3, "5.1", "5.2")]),
                  "o/b": repo([pr(2, "chore: release", "release-please--branches--main", "github-actions")])}
@@ -207,6 +217,26 @@ class Consulta(unittest.TestCase):
             nodos, errores = gp.consultar(["o/a", "o/b"], "t")
         self.assertEqual(nodos, {"o/a": {"nameWithOwner": "o/a"}, "o/b": None})
         self.assertEqual(errores, [{"repo": "o/b", "detalle": "Could not resolve to a Repository"}])
+
+    def test_una_consulta_por_token_de_dueno(self):
+        llamadas = []
+
+        def http(metodo, url, token, cuerpo=None):
+            llamadas.append((token, sorted(set(re.findall(r'owner: "([^"]+)"', cuerpo["query"])))))
+            alias = re.findall(r"(r\d+): repository", cuerpo["query"])
+            return {"data": {a: {"nameWithOwner": a} for a in alias}}
+
+        with mock.patch.object(gp, "http", http), mock.patch.dict("os.environ", {"GH_TOKEN_ESCALA_AGENCIA": "te"}):
+            nodos, errores = gp.consultar(["o/a", "Escala-Agencia/w", "o/b"], "t")
+        self.assertEqual(llamadas, [("t", ["o"]), ("te", ["Escala-Agencia"])])
+        self.assertEqual(nodos, {"o/a": {"nameWithOwner": "r0"}, "Escala-Agencia/w": {"nameWithOwner": "r1"},
+                                 "o/b": {"nameWithOwner": "r2"}})
+        self.assertEqual(errores, [])
+
+    def test_token_de_sin_variable_del_dueno_usa_el_comun(self):
+        with mock.patch.dict("os.environ", {"GH_TOKEN_ESCALA_AGENCIA": "te"}):
+            self.assertEqual(gp.token_de("Escala-Agencia/w", "t"), "te")
+            self.assertEqual(gp.token_de("mariomina/x", "t"), "t")
 
     def test_sin_data_y_con_errores_lanza_fallo(self):
         with mock.patch.object(gp, "http", return_value={"errors": [{"message": "Bad credentials"}]}), \

@@ -8,6 +8,8 @@ Modos:
   completo (por defecto)  Lee mario-home/AGENTS.md, recorre sus punteros (y los de cada home
                           repo apuntado, en cascada) y revisa el AGENTS.md de cada repo.
   --remoto                Igual, pero lee cada AGENTS.md por la API de GitHub (CI; necesita GH_TOKEN).
+                          Un token de GitHub App vale para una sola cuenta: GH_TOKEN_<DUEÑO> (p. ej.
+                          GH_TOKEN_ESCALA_AGENCIA) manda sobre GH_TOKEN en los repos de ese dueño.
   --repo RUTA             Solo la estructura de un repo: AGENTS.md, tipo-repo y excepciones (PR de cada repo).
 
 Violaciones (salida 1): repo apuntado sin AGENTS.md o sin tipo-repo válido; regla global repetida
@@ -73,11 +75,17 @@ def leer_local(ruta):
     return f.read_text(encoding="utf-8") if f.is_file() else None
 
 
+def token(nombre):
+    """Token para `owner/repo`: GH_TOKEN_<DUEÑO> si existe, si no GH_TOKEN. Mismo criterio en github_pendientes.py."""
+    dueno = re.sub(r"\W", "_", nombre.split("/")[0]).upper()
+    return os.environ.get(f"GH_TOKEN_{dueno}") or os.environ["GH_TOKEN"]
+
+
 def leer_remoto(nombre):
     if not nombre:
         return None
     req = urllib.request.Request(f"https://api.github.com/repos/{nombre}/contents/AGENTS.md",
-                                 headers={"Authorization": f"bearer {os.environ['GH_TOKEN']}",
+                                 headers={"Authorization": f"bearer {token(nombre)}",
                                           "Accept": "application/vnd.github+json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
