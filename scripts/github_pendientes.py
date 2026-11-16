@@ -1,8 +1,10 @@
 """Pendientes de GitHub en los repos de Mario: qué se fusiona solo, qué espera su decisión y qué se avisa.
 
 Decisiones de Mario (mariomina/mario-2-cerebro#280):
-  - PR de versión (release-please): se fusiona sola. La fusiona el job reutilizable; si sigue abierta
-    tras 10 min sin cambios, la fusiona `--fusionar` con el token de Mario (eso dispara la versión).
+  - PR de versión (release-please): se fusiona sola, solo con CI en verde (statusCheckRollup = SUCCESS,
+    mariomina/.github#28). La crea y la fusiona el job reutilizable con el token de la GitHub App
+    mariomina-automatizacion (el CI corre en la PR y el merge dispara la versión); si su CI acaba después,
+    la fusiona `--fusionar`. CI rojo o sin CI tras 10 min: espera la decisión de Mario.
   - Dependabot de parche o menor: se fusiona sola con CI en verde (statusCheckRollup = SUCCESS).
   - Dependabot mayor (o título sin semver, o versión 0.x) y PR de trabajo: esperan la decisión de Mario.
   - Avisos (nunca se borra ni se cierra nada): workflow desactivado por 60 días sin actividad (no vuelve
@@ -24,9 +26,10 @@ en los repos de ese dueño: un token de GitHub App vale para una sola cuenta):
                                     tiene más de 10 min, la refresca en segundo plano. Siempre sale con 0
   github_pendientes.py --hermes     hook pre_llm_call de Hermes: {"context": línea} en el primer turno
   github_pendientes.py --fusionar-version
-                                    paso del job reutilizable release-please: fusiona cada PR de $PRS en
-                                    $GITHUB_REPOSITORY y escribe `fusionadas=N` en $GITHUB_OUTPUT (también si
-                                    una falla); salida 1 si alguna falla
+                                    paso del job reutilizable release-please: espera el CI de cada PR de $PRS
+                                    en $GITHUB_REPOSITORY (hasta 10 min), la fusiona solo en verde y escribe
+                                    `fusionadas=N` en $GITHUB_OUTPUT (también si una falla); salida 1 si alguna
+                                    tiene CI rojo, no tiene CI o no se puede fusionar
 """
 import argparse
 import importlib.util
@@ -50,11 +53,16 @@ HOME_REPO = "mariomina/mario-home"
 CACHE = Path.home() / ".cache" / "mariomina-github" / "pendientes.json"  # fija: la comparten Claudian y Hermes
 CADUCA = timedelta(minutes=10)      # caché más vieja: `--linea` la refresca en segundo plano
 BLOQUEO = timedelta(minutes=2)      # un refresco en curso no se lanza dos veces
-VERSION_ATASCADA = timedelta(minutes=10)
+VERSION_SIN_CI = timedelta(minutes=10)  # PR de versión sin checks tras este tiempo: espera a Mario
 VIEJA = timedelta(days=7)
 MAX_REFS_LINEA = 4
 METODOS = ("merge", "squash", "rebase")  # `--fusionar-version` prueba en este orden los que el repo permita
-INTENTOS = 4                             # mientras GitHub calcula si la PR de versión es fusionable
+ESPERA_CI = timedelta(minutes=10)        # `--fusionar-version` espera al CI de la PR hasta este plazo
+SIN_CI = timedelta(minutes=2)            # sin ningún check tras este tiempo: la PR no tiene CI
+SONDEO = 15                              # segundos entre lecturas del CI
+AUTORES_VERSION = {"github-actions", "mariomina-automatizacion"}  # GITHUB_TOKEN o la GitHub App (#28)
+PR_VERSION = """query($o: String!, $n: String!, $pr: Int!) { repository(owner: $o, name: $n) {
+  pullRequest(number: $pr) { state merged headRefOid commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }"""
 RE_SALTO = re.compile(r"\bfrom (\S+) to (\S+)", re.I)
 RE_VERSION = re.compile(r"v?(\d+(?:\.\d+)*)")
 
@@ -184,8 +192,8 @@ def _autor(pr):
 
 
 def _es_version(pr):
-    """Rama de release-please, autor github-actions y no desde un fork (una rama así en un fork no cuenta)."""
-    return (pr.get("headRefName", "").startswith("release-please--") and _autor(pr) == "github-actions"
+    """Rama de release-please, autor github-actions o la App y no desde un fork (una rama así en un fork no cuenta)."""
+    return (pr.get("headRefName", "").startswith("release-please--") and _autor(pr) in AUTORES_VERSION
             and pr.get("isCrossRepository") is False)
 
 
@@ -201,8 +209,13 @@ def clasificar_pr(repo, pr, ahora):
          "sha": pr.get("headRefOid"), "ci": ci, "creada": pr.get("createdAt")}
     if _es_version(pr):
         quieta = ahora - _fecha(pr.get("updatedAt") or pr["createdAt"])
-        e.update(clase="version", accion="fusionar" if quieta >= VERSION_ATASCADA else "esperar",
-                 motivo="atascada: la fusiona el barrido" if quieta >= VERSION_ATASCADA else "la fusiona el job")
+        e["clase"] = "version"
+        if ci == "SUCCESS":
+            e.update(accion="fusionar", motivo="CI en verde")
+        elif ci in ("PENDING", "EXPECTED") or (not ci and quieta < VERSION_SIN_CI):
+            e.update(accion="esperar", motivo="CI en curso")
+        else:
+            e.update(accion="decision", motivo="PR de versión con CI rojo" if ci else "PR de versión sin CI")
     elif _es_dependabot(pr):
         s = salto(pr["title"])
         e["clase"] = f"dependabot-{s}"
@@ -325,50 +338,82 @@ def fusionar(estado, token, discreto=False):
     return hechas, errores
 
 
-def fusionar_pr_version(repo, numero, token, esperar=None):
-    """Fusiona una PR de versión con el primer método que el repo permita; reintenta mientras GitHub
-    calcula si es fusionable. Devuelve el método (o «ya estaba fusionada»); lanza Fallo si no puede."""
-    esperar = esperar or time.sleep
-    for intento in range(1, INTENTOS + 1):
-        error, no_permitido = "", False
-        for metodo in METODOS:
-            try:
-                http("PUT", f"{API}/repos/{repo}/pulls/{numero}/merge", token, {"merge_method": metodo})
-                return metodo
-            except urllib.error.HTTPError as x:
-                motivo = _motivo(x)
-                error, no_permitido = f"HTTP {x.code} {motivo}".strip(), x.code == 405 and "not allowed" in motivo.lower()
-                if not no_permitido:
-                    break
-            except OSError as x:  # red: el PUT pudo llegar; lo dice el GET de abajo
-                error = f"{type(x).__name__}: {x}"
-                break
+def estado_pr_version(repo, numero, token):
+    """(state, merged, sha de la cabeza, statusCheckRollup de ese commit o None) de una PR."""
+    dueno, nombre = repo.split("/")
+    d = http("POST", f"{API}/graphql", token,
+             {"query": PR_VERSION, "variables": {"o": dueno, "n": nombre, "pr": numero}})
+    p = ((d.get("data") or {}).get("repository") or {}).get("pullRequest")
+    if not p:
+        raise Fallo(f"#{numero}: no se puede leer la PR ({((d.get('errors') or [{}])[0]).get('message', '')})")
+    commit = (((p.get("commits") or {}).get("nodes") or [{}])[0] or {}).get("commit") or {}
+    return p["state"], p["merged"], p["headRefOid"], (commit.get("statusCheckRollup") or {}).get("state")
+
+
+def _fusionar_sha(repo, numero, token, sha):
+    """PUT merge con el sha revisado, con el primer método que el repo permita. Devuelve el método, o None
+    si GitHub aún no la deja fusionar (o la red falló: la siguiente lectura dice si entró). Fallo si no se puede."""
+    for metodo in METODOS:
         try:
-            if http("GET", f"{API}/repos/{repo}/pulls/{numero}", token).get("merged"):
-                return "ya estaba fusionada"
-        except (OSError, ValueError) as x:
-            error = error or f"{type(x).__name__}: {x}"
-        if intento == INTENTOS or no_permitido:
-            raise Fallo(f"#{numero}: {error}")
-        print(f"#{numero}: {error}; reintento en 5 s")
-        esperar(5)
+            http("PUT", f"{API}/repos/{repo}/pulls/{numero}/merge", token, {"merge_method": metodo, "sha": sha})
+            return metodo
+        except urllib.error.HTTPError as x:
+            motivo = _motivo(x)
+            if x.code == 405 and "not allowed" in motivo.lower():
+                continue
+            if x.code in (405, 409):  # aún no fusionable o la cabeza cambió: se vuelve a leer
+                print(f"#{numero}: HTTP {x.code} {motivo}".strip())
+                return None
+            raise Fallo(f"#{numero}: HTTP {x.code} {motivo}".strip()) from None
+        except OSError as x:
+            print(f"#{numero}: {type(x).__name__}: {x}")
+            return None
+    raise Fallo(f"#{numero}: ningún método de fusión permitido")
+
+
+def fusionar_pr_version(repo, numero, token, esperar=None, plazo=ESPERA_CI):
+    """Espera al CI de una PR de versión y la fusiona solo con statusCheckRollup = SUCCESS, con el sha que
+    pasó el CI (mariomina/.github#28). Devuelve el método, «ya estaba fusionada» o None si el CI sigue en
+    curso al acabar el plazo (la fusiona el barrido). Fallo con CI rojo, sin CI o si no se puede fusionar."""
+    esperar = esperar or time.sleep
+    lecturas = int(plazo.total_seconds() // SONDEO)
+    for lectura in range(lecturas + 1):
+        estado, fusionada, sha, ci = estado_pr_version(repo, numero, token)
+        if fusionada:
+            return "ya estaba fusionada"
+        if estado != "OPEN":
+            raise Fallo(f"#{numero}: cerrada sin fusionar")
+        if ci in ("FAILURE", "ERROR"):
+            raise Fallo(f"#{numero}: CI rojo ({ci})")
+        if ci is None and lectura * SONDEO >= SIN_CI.total_seconds():
+            raise Fallo(f"#{numero}: sin CI tras {int(SIN_CI.total_seconds() // 60)} min")
+        if ci == "SUCCESS":
+            metodo = _fusionar_sha(repo, numero, token, sha)
+            if metodo:
+                return metodo
+        if lectura < lecturas:
+            esperar(SONDEO)
+    return None
 
 
 def fusionar_version(prs, repo, token, salida=None, esperar=None):
-    """`--fusionar-version`: fusiona cada PR de `prs` (JSON de `outputs.prs` de release-please). Escribe
-    `fusionadas=N` en `salida` también si una falla: la segunda pasada publica las que sí entraron."""
+    """`--fusionar-version`: espera el CI de cada PR de `prs` (JSON de `outputs.prs` de release-please) y la
+    fusiona en verde. Escribe `fusionadas=N` en `salida` también si una falla."""
     esperar = esperar or time.sleep
     fusionadas, fallos = 0, 0
     try:
         for pr in json.loads(prs or "[]"):
             try:
-                print(f"#{pr['number']} fusionada ({fusionar_pr_version(repo, pr['number'], token, esperar)})")
-                fusionadas += 1
+                metodo = fusionar_pr_version(repo, pr["number"], token, esperar)
             except (Fallo, OSError, ValueError) as e:
                 fallos += 1
-                print(f"::error::No se pudo fusionar la PR de versión {e}")
-        if fusionadas:
-            esperar(10)  # release-please lee la PR fusionada por la API
+                print(f"::error::No se fusionó la PR de versión {e}")
+                continue
+            if metodo:
+                fusionadas += 1
+                print(f"#{pr['number']} fusionada ({metodo})")
+            else:
+                print(f"::warning::#{pr['number']}: el CI sigue en curso; la fusiona el barrido cuando esté en verde")
     finally:
         if salida:
             with open(salida, "a", encoding="utf-8") as f:
