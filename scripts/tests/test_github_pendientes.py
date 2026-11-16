@@ -201,7 +201,7 @@ class Fusion(unittest.TestCase):
             hechas, errores = gp.fusionar(estado, "t")
         self.assertEqual(llamadas, [
             ("PUT", f"{gp.API}/repos/o/a/pulls/3/merge", {"merge_method": "squash", "sha": "sha3"}),
-            ("PUT", f"{gp.API}/repos/o/b/pulls/2/merge", {"merge_method": "merge", "sha": "sha2"})])
+            ("PUT", f"{gp.API}/repos/o/b/pulls/2/merge", {"merge_method": "squash", "sha": "sha2"})])
         self.assertEqual([(h["repo"], h["numero"]) for h in hechas], [("o/b", 2)])
         self.assertEqual(errores, [{"repo": "o/a", "detalle": "#3: HTTP 405 not mergeable"}])
 
@@ -518,7 +518,7 @@ class FusionarVersion(unittest.TestCase):
         codigo, salida, llamadas, esperas = self.correr(
             {8: [lectura(), lectura("PENDING"), lectura("SUCCESS", sha="s2"), {"merged": True}]})
         self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [15, 15]))
-        self.assertEqual(llamadas[-1], ("PUT", 8, {"merge_method": "merge", "sha": "s2"}))
+        self.assertEqual(llamadas[-1], ("PUT", 8, {"merge_method": "squash", "sha": "s2"}))
 
     def test_ci_rojo_no_fusiona_y_sale_con_1(self):
         codigo, salida, llamadas, _ = self.correr({8: [lectura("PENDING"), lectura("FAILURE")]})
@@ -537,10 +537,10 @@ class FusionarVersion(unittest.TestCase):
 
     def test_prueba_el_siguiente_metodo_si_el_repo_no_lo_permite(self):
         codigo, salida, llamadas, _ = self.correr(
-            {8: [lectura("SUCCESS"), error_http(405, "Merge commits are not allowed on this repository."),
+            {8: [lectura("SUCCESS"), error_http(405, "Squash merges are not allowed on this repository."),
                  {"merged": True}]})
         self.assertEqual((codigo, salida), (0, "fusionadas=1\n"))
-        self.assertEqual([c["merge_method"] for m, _, c in llamadas if m == "PUT"], ["merge", "squash"])
+        self.assertEqual([c["merge_method"] for m, _, c in llamadas if m == "PUT"], ["squash", "merge"])
 
     def test_cabeza_cambiada_vuelve_a_leer_y_detecta_ya_fusionada(self):
         codigo, salida, llamadas, esperas = self.correr(
