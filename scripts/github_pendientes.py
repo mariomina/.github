@@ -67,7 +67,7 @@ BLOQUEO = timedelta(minutes=2)      # un refresco en curso no se lanza dos veces
 VERSION_SIN_CI = timedelta(minutes=10)  # PR de versión sin checks tras este tiempo: espera a Mario
 VIEJA = timedelta(days=7)
 MAX_REFS_LINEA = 4
-METODOS = ("merge", "squash", "rebase")  # `--fusionar-version` prueba en este orden los que el repo permita
+METODOS = ("squash", "merge", "rebase")  # en este orden, los que el repo permita (squash: mariomina/.github#27)
 ESPERA_CI = timedelta(minutes=10)        # `--fusionar-version` espera al CI de la PR hasta este plazo
 SIN_CI = timedelta(minutes=2)            # sin ningún check tras este tiempo: la PR no tiene CI
 SONDEO = 15                              # segundos entre lecturas del CI
@@ -268,8 +268,8 @@ def analizar(nodos, errores, ahora, sin_proyectos=()):
         abiertas = (n.get("pullRequests") or {}).get("nodes") or []
         for pr in abiertas:
             e = clasificar_pr(repo, pr, ahora)
-            e["metodo"] = ("merge" if n.get("mergeCommitAllowed") else
-                           "squash" if n.get("squashMergeAllowed") else "rebase")
+            e["metodo"] = ("squash" if n.get("squashMergeAllowed") else
+                           "merge" if n.get("mergeCommitAllowed") else "rebase")
             prs.append(e)
             if e["clase"] != "version" and ahora - _fecha(pr["createdAt"]) > VIEJA:
                 avisos.append({"repo": repo, "tipo": "pr-vieja", "detalle": f"#{pr['number']} {pr['title']}",
