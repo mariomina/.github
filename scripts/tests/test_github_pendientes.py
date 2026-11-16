@@ -151,6 +151,7 @@ class Clasificacion(unittest.TestCase):
                 mock.patch.object(gp, "consultar", return_value=(nodos, [])), \
                 mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
                 mock.patch.object(gp, "consultar_metricas", return_value={}), \
+                mock.patch.object(gp, "freno", return_value=None), \
                 mock.patch.dict("os.environ", {"GH_TOKEN_E": "gho_usuario"}):
             avisos = [(a["repo"], a["tipo"]) for a in gp.recoger("ghs_app", AHORA)["avisos"]]
         self.assertEqual(avisos, [("e/w", "issue-sin-proyecto")])
@@ -377,6 +378,7 @@ class Metricas(unittest.TestCase):
                 mock.patch.object(gp, "consultar", return_value=({"o/a": repo()}, [])), \
                 mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
                 mock.patch.object(gp, "consultar_metricas", side_effect=TimeoutError("lento")), \
+                mock.patch.object(gp, "freno", return_value=None), \
                 mock.patch.dict("os.environ", {}):
             estado = gp.recoger("t", AHORA)
         self.assertNotIn("metricas", estado)
@@ -394,6 +396,40 @@ class Metricas(unittest.TestCase):
             nodos = gp.consultar_metricas(["o/a", "E/w"], "t", AHORA)
         self.assertEqual(llamadas, [("t", ["o"], "2026-10-17T20:00:00Z"), ("te", ["E"], "2026-10-17T20:00:00Z")])
         self.assertEqual(nodos, {"o/a": {}, "E/w": {}})
+
+
+class Freno(unittest.TestCase):
+    """mariomina/mario-home#41: un issue abierto «FRENO: …» en mario-home pausa toda fusión automática."""
+
+    def test_detecta_el_issue_y_usa_el_token_de_mariomina(self):
+        vistos = []
+
+        def http(metodo, url, token, cuerpo=None):
+            vistos.append((url, token))
+            return [{"title": "FRENO: nada"} | {"pull_request": {}}, {"title": "FRENO: main roto"}]
+
+        with mock.patch.object(gp, "http", http), mock.patch.dict("os.environ", {"GH_TOKEN_MARIOMINA": "th"}):
+            self.assertEqual(gp.freno("t"), "FRENO: main roto")  # una PR con ese título no cuenta
+        self.assertEqual(vistos, [(f"{gp.API}/repos/mariomina/mario-home/issues?state=open&per_page=100", "th")])
+
+    def test_sin_red_es_fallo(self):
+        with mock.patch.object(gp, "http", side_effect=urllib.error.URLError("x")), self.assertRaises(gp.Fallo):
+            gp.freno("t")
+
+    def test_barrido_con_freno_no_fusiona_y_la_linea_lo_dice(self):
+        estado = gp.analizar({"o/a": repo([dependabot(3, "5.1", "5.2")])}, [], AHORA)
+        estado["freno"] = "FRENO: main roto"
+        llamadas = []
+        with mock.patch.object(gp, "obtener_token", return_value="t"), \
+                mock.patch.object(gp, "recoger", return_value=estado), \
+                mock.patch.object(gp, "freno", return_value="FRENO: main roto"), \
+                mock.patch.object(gp, "http", lambda *a, **k: llamadas.append(a)), \
+                mock.patch.object(gp, "log_publico", return_value=False), \
+                mock.patch.dict("os.environ", {"GITHUB_ACTIONS": "true"}), mock.patch("sys.stdout", io.StringIO()) as out:
+            self.assertEqual(gp.main(["--fusionar"]), 0)
+        self.assertEqual(llamadas, [])
+        self.assertIn("No se fusiona nada: freno activo: FRENO: main roto", out.getvalue())
+        self.assertTrue(gp.resumen(estado, AHORA).startswith("GitHub: FRENO activo, no se fusiona nada (FRENO: main roto)"))
 
 
 class Paginacion(unittest.TestCase):
@@ -452,11 +488,15 @@ def lectura(ci=None, estado="OPEN", fusionada=False, sha="s1"):
 class FusionarVersion(unittest.TestCase):
     """`--fusionar-version`: espera el CI de la PR de versión y la fusiona solo en verde (mariomina/.github#28)."""
 
+    issues = []  # issues abiertos de mario-home (freno)
+
     def correr(self, respuestas, prs='[{"number": 8}]'):
         """respuestas: {número: [respuesta o excepción por llamada (lectura GraphQL o PUT), en orden]}."""
         llamadas, esperas = [], []
 
         def http(metodo, url, token, cuerpo=None):
+            if url.endswith("/issues?state=open&per_page=100"):
+                return self.issues
             if metodo == "POST":
                 numero = cuerpo["variables"]["pr"]
                 llamadas.append(("LEER", numero, None))
@@ -517,6 +557,16 @@ class FusionarVersion(unittest.TestCase):
         codigo, salida, llamadas, esperas = self.correr({8: [lectura("SUCCESS")] + no})
         self.assertEqual((codigo, salida, esperas), (1, "fusionadas=0\n", []))
 
+    def test_freno_activo_no_fusiona_nada_y_sale_con_0(self):
+        self.issues = [{"title": "feat: otra cosa"}, {"title": "FRENO: main roto", "number": 9}]
+        codigo, salida, llamadas, _ = self.correr({8: [lectura("SUCCESS"), {"merged": True}]})
+        self.assertEqual((codigo, salida, llamadas), (0, "fusionadas=0\n", []))
+
+    def test_freno_sin_comprobar_no_fusiona(self):
+        with mock.patch.object(gp, "freno", side_effect=gp.Fallo("no se puede comprobar el freno (URLError)")):
+            codigo, salida, llamadas, _ = self.correr({8: [lectura("SUCCESS"), {"merged": True}]})
+        self.assertEqual((codigo, salida, llamadas), (0, "fusionadas=0\n", []))
+
     def test_cerrada_sin_fusionar_falla_y_sigue_con_las_demas(self):
         codigo, salida, llamadas, _ = self.correr(
             {8: [lectura(estado="CLOSED")], 9: [lectura("SUCCESS"), {"merged": True}]},
@@ -530,6 +580,7 @@ class FusionarVersion(unittest.TestCase):
             entorno = {"GITHUB_REPOSITORY": "o/r", "PRS": '[{"number": 8}]', "GITHUB_OUTPUT": str(salida)}
             with mock.patch.object(gp, "obtener_token", return_value="t"), mock.patch.dict("os.environ", entorno), \
                     mock.patch.object(gp, "fusionar_pr_version", return_value="merge") as fusionar, \
+                    mock.patch.object(gp, "freno", return_value=None), \
                     mock.patch.object(gp.time, "sleep"), mock.patch("builtins.print"):
                 self.assertEqual(gp.main(["--fusionar-version"]), 0)
             fusionar.assert_called_once()

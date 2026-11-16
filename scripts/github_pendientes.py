@@ -17,6 +17,10 @@ Métricas (mariomina/mario-home#22), últimos 7 y 28 días, desde el historial d
   - reverts: fusionadas con título `revert:` o `Revert "…"`.
   - CI rojo en la rama principal: commits con FAILURE o ERROR / commits con checks.
 
+Freno de emergencia (mariomina/mario-home#41): un issue abierto en mario-home cuyo título empieza por
+«FRENO:» pausa toda fusión automática (barrido y PR de versión). Si no se puede comprobar, tampoco se
+fusiona: falla del lado seguro. Reanudar = cerrar el issue. Runbook: mario-home/entorno/freno.md.
+
 Log público: en Actions, si el repo que lo ejecuta no es privado, solo imprime cuentas (sin repos, PR,
 ramas ni títulos). El barrido programado vive en mario-home (privado) por eso.
 
@@ -56,6 +60,7 @@ sys.dont_write_bytecode = True  # cargar filtro_global.py no deja __pycache__ en
 
 API = "https://api.github.com"
 HOME_REPO = "mariomina/mario-home"
+FRENO = "FRENO:"
 CACHE = Path.home() / ".cache" / "mariomina-github" / "pendientes.json"  # fija: la comparten Claudian y Hermes
 CADUCA = timedelta(minutes=10)      # caché más vieja: `--linea` la refresca en segundo plano
 BLOQUEO = timedelta(minutes=2)      # un refresco en curso no se lanza dos veces
@@ -315,6 +320,10 @@ def recoger(token, ahora=None):
     ciegos = {n for n in nombres if token_de(n, token).startswith("ghs_")}
     estado = analizar(nodos, errores, ahora or datetime.now(timezone.utc), ciegos)
     estado["avisos"] = workflows_desactivados(nombres, token) + estado["avisos"]
+    try:
+        estado["freno"] = freno(token)
+    except Fallo:
+        estado["freno"] = None
     try:  # las métricas nunca tumban el barrido ni la línea
         estado["metricas"] = metricas(consultar_metricas(nombres, token, ahora or datetime.now(timezone.utc)),
                                       ahora or datetime.now(timezone.utc))
@@ -412,6 +421,27 @@ def _motivo(x):
         x.close()
 
 
+def freno(token):
+    """Título del issue de freno abierto en mario-home, o None. Fallo si no se puede comprobar."""
+    try:
+        issues = http("GET", f"{API}/repos/{HOME_REPO}/issues?state=open&per_page=100", token_de(HOME_REPO, token))
+    except (OSError, ValueError) as x:
+        raise Fallo(f"no se puede comprobar el freno ({type(x).__name__})") from None
+    for i in issues if isinstance(issues, list) else []:
+        if (i.get("title") or "").startswith(FRENO) and "pull_request" not in i:
+            return i["title"]
+    return None
+
+
+def _freno_o_motivo(token):
+    """Motivo para no fusionar (freno activo o sin comprobar), o None."""
+    try:
+        titulo = freno(token)
+    except Fallo as e:
+        return str(e)
+    return f"freno activo: {titulo}" if titulo else None
+
+
 def fusionar(estado, token, discreto=False):
     """Fusiona las PR con acción `fusionar` (con el sha revisado). Un error no corta las demás.
     `discreto`: el log no nombra repos, PR ni títulos (log público)."""
@@ -501,6 +531,10 @@ def fusionar_version(prs, repo, token, salida=None, esperar=None):
     esperar = esperar or time.sleep
     fusionadas, fallos = 0, 0
     try:
+        motivo = _freno_o_motivo(token)
+        if motivo:
+            print(f"::warning::No se fusiona ninguna PR de versión: {motivo} (mariomina/mario-home#41)")
+            return 0
         for pr in json.loads(prs or "[]"):
             try:
                 metodo = fusionar_pr_version(repo, pr["number"], token, esperar)
@@ -560,6 +594,8 @@ def resumen(estado, ahora):
     """La línea «GitHub: …» de la apertura de sesión."""
     if estado.get("error"):
         return f"GitHub: sin datos ({estado['error']})"
+    if estado.get("freno"):
+        return f"GitHub: FRENO activo, no se fusiona nada ({estado['freno']}) · {_hace(estado['generado'], ahora)}"
     prs = estado.get("prs", [])
     decisiones = [p for p in prs if p["accion"] == "decision"]
     if decisiones:
@@ -744,7 +780,11 @@ def main(argv=None):
         return 1
     errores = []
     if a.fusionar:  # las fusionadas siguen en la tabla y la caché como `fusionada`
-        _, errores = fusionar(estado, token, discreto)
+        motivo = _freno_o_motivo(token)
+        if motivo:
+            print(f"No se fusiona nada: {motivo}" if not discreto else "No se fusiona nada: freno activo o sin comprobar")
+        else:
+            _, errores = fusionar(estado, token, discreto)
     if not os.environ.get("GITHUB_ACTIONS"):
         guardar_cache(estado)
     if discreto:
