@@ -1,18 +1,19 @@
 """Filtro global de reglas: comprueba que el AGENTS.md de cada repo cumple el reparto global/repo.
 
-Regla (mariomina/2-cerebro#276): una regla vive en home-mario solo si aplica sin excepción a
+Regla (mariomina/mario-2-cerebro#276): una regla vive en mario-home solo si aplica sin excepción a
 todos los tipos de repo. Si un repo necesita una excepción, la regla baja de nivel: no se
 escribe la excepción.
 
 Modos:
-  completo (por defecto)  Lee home-mario/AGENTS.md, recorre sus punteros (y los de cada home
+  completo (por defecto)  Lee mario-home/AGENTS.md, recorre sus punteros (y los de cada home
                           repo apuntado, en cascada) y revisa el AGENTS.md de cada repo.
   --remoto                Igual, pero lee cada AGENTS.md por la API de GitHub (CI; necesita GH_TOKEN).
   --repo RUTA             Solo la estructura de un repo: AGENTS.md, tipo-repo y excepciones (PR de cada repo).
 
 Violaciones (salida 1): repo apuntado sin AGENTS.md o sin tipo-repo válido; regla global repetida
 en un repo; repo que declara una excepción a una regla global.
-Avisos (salida 0): repo con git en ~/Documentos/Proyectos que no está en ningún puntero.
+Avisos (salida 0): repo con git en ~/Documentos/Mario (o en una carpeta de grupo sin git, como
+mario-agencia/) que no está en ningún puntero.
 Salida JSON en stdout.
 """
 import argparse
@@ -26,7 +27,7 @@ import urllib.request
 from pathlib import Path
 
 TIPOS = {"vault", "producto", "cliente", "web", "home", "agente"}
-PROYECTOS = Path.home() / "Documentos" / "Proyectos"
+PROYECTOS = Path.home() / "Documentos" / "Mario"
 IGNORAR_DIRS = {"worktrees"}
 SIMILITUD = 0.9          # dos líneas con ratio >= 0.9 cuentan como la misma regla
 MIN_REGLA = 40           # una regla más corta no se compara (evita falsos positivos)
@@ -34,7 +35,7 @@ RE_TIPO = re.compile(r"^\s*tipo-repo:\s*([a-z-]+)\s*$", re.M)
 RE_RUTA = re.compile(r"`(~/[^`]+)`")   # ruta local del repo: cualquiera bajo ~ (p. ej. ~/.hermes)
 RE_CLONE = re.compile(r"git@github\.com:([\w.-]+/[\w.-]+?)\.git")
 RE_EXCEPCION = re.compile(
-    r"(excepci[oó]n|no aplica|salvo|se ignora|ignora|no rige)[^.\n]{0,80}(regla(s)? global(es)?|home-mario)",
+    r"(excepci[oó]n|no aplica|salvo|se ignora|ignora|no rige)[^.\n]{0,80}(regla(s)? global(es)?|mario-home)",
     re.I)
 
 
@@ -112,13 +113,25 @@ def revisar_duplicados(nombre, texto, globales, violaciones):
                 break
 
 
+def repos_locales():
+    """Repos con git en PROYECTOS y en sus carpetas de grupo (un nivel, carpetas sin git: mario-agencia/)."""
+    for d in sorted(PROYECTOS.iterdir()):
+        if d.name in IGNORAR_DIRS or not d.is_dir():
+            continue
+        if (d / ".git").exists():
+            yield d
+        elif not d.is_symlink():
+            yield from (h for h in sorted(d.iterdir())
+                        if h.is_dir() and h.name not in IGNORAR_DIRS and (h / ".git").exists())
+
+
 def modo_completo(home, remoto):
     violaciones, avisos, repos = [], [], []
     texto_home = leer_local(home)
     if texto_home is None:
         sys.exit(json.dumps({"valido": False, "error": f"no existe {home}/AGENTS.md"}))
     globales = reglas_globales(texto_home)
-    revisar_estructura("home-mario", texto_home, violaciones)
+    revisar_estructura("mario-home", texto_home, violaciones)
     vistos, pendientes = {str(Path(home).resolve())}, list(punteros(texto_home))
     while pendientes:
         ruta, nombre = pendientes.pop(0)
@@ -136,9 +149,7 @@ def modo_completo(home, remoto):
         if tipo == "home":
             pendientes.extend(punteros(texto))
     if not remoto and PROYECTOS.is_dir():
-        for d in sorted(PROYECTOS.iterdir()):
-            if d.name in IGNORAR_DIRS or not (d / ".git").exists():
-                continue
+        for d in repos_locales():
             if str(d.resolve()) not in vistos:
                 avisos.append({"repo": d.name, "regla": "sin-puntero",
                                "detalle": "repo con git que no está en ningún puntero"})
@@ -154,7 +165,7 @@ def modo_repo(ruta):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--home", default=str(PROYECTOS / "home-mario"))
+    p.add_argument("--home", default=str(PROYECTOS / "mario-home"))
     p.add_argument("--remoto", action="store_true")
     p.add_argument("--repo")
     a = p.parse_args()
