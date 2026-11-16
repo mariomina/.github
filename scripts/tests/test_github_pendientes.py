@@ -150,6 +150,7 @@ class Clasificacion(unittest.TestCase):
         with mock.patch.object(gp, "repos", return_value=["o/a", "e/w"]), \
                 mock.patch.object(gp, "consultar", return_value=(nodos, [])), \
                 mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
+                mock.patch.object(gp, "consultar_metricas", return_value={}), \
                 mock.patch.dict("os.environ", {"GH_TOKEN_E": "gho_usuario"}):
             avisos = [(a["repo"], a["tipo"]) for a in gp.recoger("ghs_app", AHORA)["avisos"]]
         self.assertEqual(avisos, [("e/w", "issue-sin-proyecto")])
@@ -332,6 +333,93 @@ class Linea(unittest.TestCase):
                          {"context": "GitHub: nada espera tu decisión · hace 0 min"})
         self.assertEqual(gp.hermes(json.dumps({"extra": {"is_first_turn": False}}), **kw), {})
         self.assertEqual(gp.hermes("no es json", **kw), {})
+
+
+def nodo_metricas(prs=(), commits=()):
+    """prs: (título, autor, fusionador, hace); commits: (estado o None, hace)."""
+    return {"pullRequests": {"nodes": [{"title": t, "mergedAt": iso(h), "author": {"login": a},
+                                        "mergedBy": {"login": f}} for t, a, f, h in prs]},
+            "defaultBranchRef": {"target": {"history": {"nodes": [
+                {"committedDate": iso(h), "statusCheckRollup": {"state": e} if e else None} for e, h in commits]}}}}
+
+
+class Metricas(unittest.TestCase):
+    """mariomina/mario-home#22: reverts, CI rojo en la rama principal y fusionadas por bots."""
+
+    def test_cuenta_por_ventana(self):
+        d = timedelta(days=1)
+        nodos = {"o/a": nodo_metricas(
+            prs=[("feat: algo", "mariomina", "mariomina", 2 * d),
+                 ("chore(main): release 1.0.0", "app/mariomina-automatizacion", "mariomina-automatizacion", 3 * d),
+                 ("chore: Bump x from 1.0 to 1.1", "dependabot[bot]", "mariomina", 4 * d),
+                 ('Revert "feat: algo"', "mariomina", "mariomina", 5 * d),
+                 ("revert: quitar algo", "mariomina", "mariomina", 10 * d),
+                 ("feat: vieja", "mariomina", "mariomina", 40 * d)],
+            commits=[("SUCCESS", d), ("FAILURE", 2 * d), (None, 3 * d), ("ERROR", 20 * d), ("SUCCESS", 40 * d)]),
+                 "o/sin": None}
+        m = gp.metricas(nodos, AHORA)
+        self.assertEqual(m["7"], {"fusionadas": 4, "por_bots": 1, "reverts": 1, "ci_rojo": 1, "commits_con_ci": 2})
+        self.assertEqual(m["28"], {"fusionadas": 5, "por_bots": 1, "reverts": 2, "ci_rojo": 2, "commits_con_ci": 3})
+
+    def test_linea_y_resumen(self):
+        m = {"fusionadas": 12, "por_bots": 5, "reverts": 0, "ci_rojo": 1, "commits_con_ci": 20}
+        self.assertEqual(gp.linea_metricas(m), "7 d: 12 fusionadas (5 por bots) · 0 reverts · CI rojo 1/20")
+        estado = gp.analizar({"o/a": repo()}, [], AHORA)
+        estado["metricas"] = {"7": m, "28": m}
+        self.assertIn("· 7 d: 12 fusionadas (5 por bots) · 0 reverts · CI rojo 1/20 · hace 0 min",
+                      gp.resumen(estado, AHORA))
+        self.assertIn("Métricas: 7 d: 12 fusionadas", gp.tabla(estado, AHORA))
+        self.assertIn("28 d: 12 fusionadas", gp.tabla(estado, AHORA))
+        self.assertEqual(gp.linea_metricas(None), "")
+
+    def test_un_fallo_de_metricas_no_tumba_recoger(self):
+        with mock.patch.object(gp, "repos", return_value=["o/a"]), \
+                mock.patch.object(gp, "consultar", return_value=({"o/a": repo()}, [])), \
+                mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
+                mock.patch.object(gp, "consultar_metricas", side_effect=TimeoutError("lento")), \
+                mock.patch.dict("os.environ", {}):
+            estado = gp.recoger("t", AHORA)
+        self.assertNotIn("metricas", estado)
+        self.assertEqual(estado["errores"], [{"repo": "métricas", "detalle": "TimeoutError: lento"}])
+
+    def test_una_consulta_por_token_desde_la_ventana_mayor(self):
+        llamadas = []
+
+        def http(metodo, url, token, cuerpo=None):
+            llamadas.append((token, re.findall(r'owner: "([^"]+)"', cuerpo["query"]),
+                             re.search(r'since: "([^"]+)"', cuerpo["query"]).group(1)))
+            return {"data": {a: {} for a in re.findall(r"(m\d+): repository", cuerpo["query"])}}
+
+        with mock.patch.object(gp, "http", http), mock.patch.dict("os.environ", {"GH_TOKEN_E": "te"}):
+            nodos = gp.consultar_metricas(["o/a", "E/w"], "t", AHORA)
+        self.assertEqual(llamadas, [("t", ["o"], "2026-10-17T20:00:00Z"), ("te", ["E"], "2026-10-17T20:00:00Z")])
+        self.assertEqual(nodos, {"o/a": {}, "E/w": {}})
+
+
+class Paginacion(unittest.TestCase):
+    def test_pagina_commits_y_prs_solo_mientras_hace_falta(self):
+        desde = "2026-10-17T20:00:00Z"
+        nodo = {"defaultBranchRef": {"target": {"history": {
+                    "pageInfo": {"hasNextPage": True, "endCursor": "c1"}, "nodes": [{"committedDate": "x1"}]}}},
+                "pullRequests": {"pageInfo": {"hasPreviousPage": True, "startCursor": "p1"},
+                                 "nodes": [{"updatedAt": "2026-11-01T00:00:00Z"}]}}
+        respuestas = [
+            {"data": {"repository": {"defaultBranchRef": {"target": {"history": {
+                "pageInfo": {"hasNextPage": False, "endCursor": "c2"}, "nodes": [{"committedDate": "x2"}]}}}}}},
+            {"data": {"repository": {"pullRequests": {"pageInfo": {"hasPreviousPage": True, "startCursor": "p2"},
+                                                      "nodes": [{"updatedAt": "2026-10-01T00:00:00Z"}]}}}}]
+        consultas = []
+
+        def http(metodo, url, token, cuerpo=None):
+            consultas.append(cuerpo["query"])
+            return respuestas.pop(0)
+
+        with mock.patch.object(gp, "http", http):
+            gp._completar("o/a", nodo, "t", desde)
+        self.assertEqual([c["committedDate"] for c in nodo["defaultBranchRef"]["target"]["history"]["nodes"]], ["x1", "x2"])
+        self.assertEqual(len(nodo["pullRequests"]["nodes"]), 2)  # para: la página nueva ya es anterior a la ventana
+        self.assertIn('after: "c1"', consultas[0])
+        self.assertIn('before: "p1"', consultas[1])
 
 
 class WorkflowsDesactivados(unittest.TestCase):
