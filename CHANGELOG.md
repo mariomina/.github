@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/mariomina/.github/compare/v1.4.2...v1.5.0) (2026-11-16)
+
+
+### Novedades
+
+* **filtro:** estructura ~/Documentos/Mario y nombres nuevos de repos ([919dfe3](https://github.com/mariomina/.github/commit/919dfe33bab760729e5448301229b0a54376a5bc))
+* **filtro:** estructura ~/Documentos/Mario y nombres nuevos de repos ([#24](https://github.com/mariomina/.github/issues/24)) ([f6372bb](https://github.com/mariomina/.github/commit/f6372bb3e6ff3c8b9f9c85c41a720258897108a3))
+
 ## [1.4.2](https://github.com/mariomina/.github/compare/v1.4.1...v1.4.2) (2026-11-15)
 
 
