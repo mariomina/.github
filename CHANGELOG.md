@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.0](https://github.com/mariomina/.github/compare/v1.7.0...v1.8.0) (2026-11-16)
+
+
+### Novedades
+
+* **scripts:** freno de emergencia para toda fusión automática ([90228e7](https://github.com/mariomina/.github/commit/90228e7298db202c3a52edce0aaa39cd316290ef))
+* **scripts:** freno de emergencia para toda fusión automática ([57bc311](https://github.com/mariomina/.github/commit/57bc311247a37086fee57985974729d07f91f875))
+
 ## [1.7.0](https://github.com/mariomina/.github/compare/v1.6.2...v1.7.0) (2026-11-16)
 
 
