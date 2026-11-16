@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/mariomina/.github/compare/v1.5.0...v1.6.0) (2026-11-16)
+
+
+### Novedades
+
+* **scripts:** token por dueño (GH_TOKEN_&lt;DUEÑO&gt;) para la GitHub App ([cd8861d](https://github.com/mariomina/.github/commit/cd8861d19164d01da5d0045293744e936a5eab94))
+* **scripts:** token por dueño (GH_TOKEN_&lt;DUEÑO&gt;) para los tokens de la GitHub App ([de8a7f8](https://github.com/mariomina/.github/commit/de8a7f8e3dc75741fcaad4749d087474fb1a42ca))
+
 ## [1.5.0](https://github.com/mariomina/.github/compare/v1.4.2...v1.5.0) (2026-11-16)
 
 
