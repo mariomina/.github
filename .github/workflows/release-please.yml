@@ -57,6 +57,17 @@ jobs:
           permission-issues: write
           permission-checks: read
           permission-statuses: read
+      # Freno de emergencia (mariomina/mario-home#41): un issue «FRENO: …» abierto en mario-home pausa la fusión.
+      # Token de solo lectura de issues de mario-home, también desde los repos de Escala-Agencia.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: home
+        if: env.HAY_APP == 'true'
+        with:
+          client-id: Iv23lip8pbiVdk2GlCTs
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: mariomina
+          repositories: mario-home
+          permission-issues: read
       - name: Aviso sin la App
         if: env.HAY_APP != 'true'
         run: echo "::warning::Sin APP_PRIVATE_KEY la PR de versión se crea con GITHUB_TOKEN, sin CI, y no se fusiona sola (mariomina/.github#28)"
@@ -80,5 +91,6 @@ jobs:
         if: steps.rp.outputs.prs_created == 'true' && steps.app.outputs.token != ''
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_TOKEN_MARIOMINA: ${{ steps.home.outputs.token }}
           PRS: ${{ steps.rp.outputs.prs }}
         run: python3 -I .mantenimiento/scripts/github_pendientes.py --fusionar-version
