@@ -11,6 +11,12 @@ Decisiones de Mario (mariomina/mario-2-cerebro#280):
     con ningún trigger: el aviso da el `gh workflow enable` que lo recupera), CI rojo en la rama principal,
     ramas sin PR y PR de más de 7 días, issues abiertos sin proyecto.
 
+Métricas (mariomina/mario-home#22), últimos 7 y 28 días, desde el historial de GitHub (sin guardar nada):
+  - fusionadas y, de ellas, por bots: creadas y fusionadas por la App, github-actions o Dependabot. El resto no
+    se puede atribuir: Mario y los agentes usan hoy la misma identidad (mariomina/mario-home#37, #38).
+  - reverts: fusionadas con título `revert:` o `Revert "…"`.
+  - CI rojo en la rama principal: commits con FAILURE o ERROR / commits con checks.
+
 Log público: en Actions, si el repo que lo ejecuta no es privado, solo imprime cuentas (sin repos, PR,
 ramas ni títulos). El barrido programado vive en mario-home (privado) por eso.
 
@@ -65,6 +71,17 @@ PR_VERSION = """query($o: String!, $n: String!, $pr: Int!) { repository(owner: $
   pullRequest(number: $pr) { state merged headRefOid commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }"""
 RE_SALTO = re.compile(r"\bfrom (\S+) to (\S+)", re.I)
 RE_VERSION = re.compile(r"v?(\d+(?:\.\d+)*)")
+RE_REVERT = re.compile(r'^(revert(\(.+\))?!?:|Revert ")', re.I)
+BOTS = {"github-actions", "mariomina-automatizacion", "dependabot"}
+VENTANAS = (7, 28)  # días
+HISTORIA = """history(since: "DESDE", first: 100CURSOR) { pageInfo { hasNextPage endCursor }
+    nodes { committedDate statusCheckRollup { state } } }"""
+FUSIONADAS = """pullRequests(states: MERGED, last: 100CURSOR, orderBy: {field: UPDATED_AT, direction: ASC}) {
+    pageInfo { hasPreviousPage startCursor } nodes { title mergedAt updatedAt author { login } mergedBy { login } } }"""
+FRAGMENTO_METRICAS = f"""fragment M on Repository {{
+  defaultBranchRef {{ target {{ ... on Commit {{ {HISTORIA.replace("CURSOR", "")} }} }} }}
+  {FUSIONADAS.replace("CURSOR", "")}
+}}"""
 
 FRAGMENTO = """fragment R on Repository {
   nameWithOwner mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
@@ -298,7 +315,89 @@ def recoger(token, ahora=None):
     ciegos = {n for n in nombres if token_de(n, token).startswith("ghs_")}
     estado = analizar(nodos, errores, ahora or datetime.now(timezone.utc), ciegos)
     estado["avisos"] = workflows_desactivados(nombres, token) + estado["avisos"]
+    try:  # las métricas nunca tumban el barrido ni la línea
+        estado["metricas"] = metricas(consultar_metricas(nombres, token, ahora or datetime.now(timezone.utc)),
+                                      ahora or datetime.now(timezone.utc))
+    except (OSError, ValueError, KeyError) as e:
+        estado["errores"].append({"repo": "métricas", "detalle": f"{type(e).__name__}: {e}"[:160]})
     return estado
+
+
+# --- métricas (mariomina/mario-home#22) ------------------------------------------------
+
+def consultar_metricas(nombres, token, ahora):
+    """{owner/repo: nodo GraphQL o None} con PR fusionadas e historial de la rama principal de la ventana mayor."""
+    desde = (ahora - timedelta(days=max(VENTANAS))).strftime("%Y-%m-%dT%H:%M:%SZ")
+    alias = {f"m{i}": n for i, n in enumerate(nombres)}
+    grupos, datos = {}, {}
+    for a, n in alias.items():
+        grupos.setdefault(token_de(n, token), []).append(a)
+    for t, lista in grupos.items():
+        campos = " ".join(f'{a}: repository(owner: "{alias[a].split("/")[0]}", name: "{alias[a].split("/")[1]}") '
+                          "{ ...M }" for a in lista)
+        d = http("POST", f"{API}/graphql", t,
+                 {"query": f"query {{ {campos} }}\n{FRAGMENTO_METRICAS.replace('DESDE', desde)}"})
+        datos.update(d.get("data") or {})
+    nodos = {n: datos.get(a) for a, n in alias.items()}
+    for n, nodo in nodos.items():
+        if nodo:
+            _completar(n, nodo, token_de(n, token), desde)
+    return nodos
+
+
+def _completar(repo, nodo, token, desde):
+    """Pagina, solo si hace falta, lo que la consulta con alias cortó en 100: commits de la ventana y PR
+    actualizadas dentro de ella (una PR fusionada en la ventana se actualizó en la ventana)."""
+    dueno, nombre = repo.split("/")
+    historia = (((nodo.get("defaultBranchRef") or {}).get("target") or {}).get("history")) or {}
+    while (historia.get("pageInfo") or {}).get("hasNextPage"):
+        q = (f'query {{ repository(owner: "{dueno}", name: "{nombre}") {{ defaultBranchRef {{ target {{ ... on Commit '
+             f'{{ {HISTORIA.replace("DESDE", desde).replace("CURSOR", ", after: " + json.dumps(historia["pageInfo"]["endCursor"]))} }} }} }} }} }}')
+        mas = http("POST", f"{API}/graphql", token, {"query": q})["data"]["repository"]["defaultBranchRef"]["target"]["history"]
+        historia["nodes"] += mas["nodes"]
+        historia["pageInfo"] = mas["pageInfo"]
+    prs = nodo.get("pullRequests") or {}
+    while ((prs.get("pageInfo") or {}).get("hasPreviousPage") and prs.get("nodes")
+           and min(p["updatedAt"] for p in prs["nodes"]) >= desde):
+        q = (f'query {{ repository(owner: "{dueno}", name: "{nombre}") {{ '
+             f'{FUSIONADAS.replace("CURSOR", ", before: " + json.dumps(prs["pageInfo"]["startCursor"]))} }} }}')
+        mas = http("POST", f"{API}/graphql", token, {"query": q})["data"]["repository"]["pullRequests"]
+        prs["nodes"] = mas["nodes"] + prs["nodes"]
+        prs["pageInfo"] = mas["pageInfo"]
+
+
+def metricas(nodos, ahora):
+    """{"7": {...}, "28": {...}}: fusionadas, por_bots, reverts, ci_rojo y commits_con_ci por ventana."""
+    salida = {}
+    for dias in VENTANAS:
+        limite = ahora - timedelta(days=dias)
+        m = {"fusionadas": 0, "por_bots": 0, "reverts": 0, "ci_rojo": 0, "commits_con_ci": 0}
+        for n in nodos.values():
+            if not n:
+                continue
+            for pr in (n.get("pullRequests") or {}).get("nodes") or []:
+                if not pr.get("mergedAt") or _fecha(pr["mergedAt"]) < limite:
+                    continue
+                m["fusionadas"] += 1
+                m["reverts"] += bool(RE_REVERT.search(pr.get("title") or ""))
+                m["por_bots"] += _autor(pr) in BOTS and _autor({"author": pr.get("mergedBy")}) in BOTS
+            historia = ((((n.get("defaultBranchRef") or {}).get("target") or {}).get("history") or {})
+                        .get("nodes") or [])
+            for c in historia:
+                if _fecha(c["committedDate"]) < limite or not c.get("statusCheckRollup"):
+                    continue
+                m["commits_con_ci"] += 1
+                m["ci_rojo"] += c["statusCheckRollup"].get("state") in ("FAILURE", "ERROR")
+        salida[str(dias)] = m
+    return salida
+
+
+def linea_metricas(m):
+    """«7 d: 12 fusionadas (5 por bots) · 0 reverts · CI rojo 1/20» o '' sin datos."""
+    if not m:
+        return ""
+    return (f"{VENTANAS[0]} d: {m['fusionadas']} fusionadas ({m['por_bots']} por bots) · {m['reverts']} reverts · "
+            f"CI rojo {m['ci_rojo']}/{m['commits_con_ci']}")
 
 
 # --- fusión -------------------------------------------------------------------------
@@ -439,7 +538,9 @@ def cuentas(estado):
     n = lambda *acciones: sum(p["accion"] in acciones for p in prs)  # noqa: E731
     return (f"GitHub: {n('fusionada')} fusionadas · {n('decision')} esperan decisión · "
             f"{n('fusionar', 'esperar')} se fusionan solas · {len(estado.get('avisos', []))} avisos · "
-            f"{len(estado.get('errores', []))} errores (log público: sin detalle)\n")
+            f"{len(estado.get('errores', []))} errores (log público: sin detalle)"
+            + (f" · {linea_metricas((estado.get('metricas') or {}).get(str(VENTANAS[0])))}" if estado.get("metricas") else "")
+            + "\n")
 
 
 # --- salidas ------------------------------------------------------------------------
@@ -477,6 +578,8 @@ def resumen(estado, ahora):
         texto += f" · {len(estado['avisos'])} avisos"
     if estado.get("errores"):
         texto += f" · {len(estado['errores'])} repos con error"
+    if linea_metricas((estado.get("metricas") or {}).get(str(VENTANAS[0]))):
+        texto += " · " + linea_metricas(estado["metricas"][str(VENTANAS[0])])
     return texto + f" · {_hace(estado['generado'], ahora)}"
 
 
@@ -488,7 +591,12 @@ def tabla(estado, ahora):
     generado = _fecha(estado["generado"]).astimezone().strftime("%Y-%m-%d %H:%M")
     filas = [(f"{p['repo']}#{p['numero']}", p["clase"], f"{ACCIONES.get(p['accion'], p['accion'])} ({p['motivo']})",
               p["titulo"]) for p in estado["prs"]]
-    lineas = [f"GitHub · {len(estado['repos'])} repos · {generado}", resumen(estado, ahora), ""]
+    lineas = [f"GitHub · {len(estado['repos'])} repos · {generado}", resumen(estado, ahora)]
+    m = estado.get("metricas") or {}
+    if m:
+        lineas.append("Métricas: " + " | ".join(
+            linea_metricas(m[str(d)]).replace(f"{VENTANAS[0]} d:", f"{d} d:", 1) for d in VENTANAS if str(d) in m))
+    lineas.append("")
     if filas:
         cab = ("PR", "Clase", "Acción", "Título")
         anchos = [max(len(f[i]) for f in filas + [cab]) for i in range(3)]
