@@ -130,6 +130,20 @@ class Clasificacion(unittest.TestCase):
         self.assertEqual(avisos, [("ci-rojo", "CI"), ("issue-sin-proyecto", "#5"), ("pr-vieja", "#1"),
                                   ("rama-vieja", "feat/vieja")])
 
+    def test_sin_aviso_de_proyecto_si_el_token_no_ve_los_projects(self):
+        nodos = {"o/a": repo(issues=[(5, 0)]), "o/b": repo(issues=[(7, 0)])}
+        avisos = [(a["repo"], a["tipo"]) for a in gp.analizar(nodos, [], AHORA, sin_proyectos={"o/a"})["avisos"]]
+        self.assertEqual(avisos, [("o/b", "issue-sin-proyecto")])
+
+    def test_recoger_trata_los_tokens_de_app_como_ciegos_a_projects(self):
+        nodos = {"o/a": repo(issues=[(5, 0)]), "e/w": repo(issues=[(7, 0)])}
+        with mock.patch.object(gp, "repos", return_value=["o/a", "e/w"]), \
+                mock.patch.object(gp, "consultar", return_value=(nodos, [])), \
+                mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
+                mock.patch.dict("os.environ", {"GH_TOKEN_E": "gho_usuario"}):
+            avisos = [(a["repo"], a["tipo"]) for a in gp.recoger("ghs_app", AHORA)["avisos"]]
+        self.assertEqual(avisos, [("e/w", "issue-sin-proyecto")])
+
     def test_repo_sin_acceso_es_error(self):
         estado = gp.analizar({"o/a": None}, [], AHORA)
         self.assertEqual(estado["errores"], [{"repo": "o/a", "detalle": "sin acceso o no existe"}])
