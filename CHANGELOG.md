@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.0](https://github.com/mariomina/.github/compare/v1.8.0...v1.9.0) (2026-11-16)
+
+
+### Novedades
+
+* **scripts:** el filtro global valida autonomia: N ([36425dc](https://github.com/mariomina/.github/commit/36425dc0073d36e38a1f4ed9e4691e4106394c5f))
+* **scripts:** el filtro global valida autonomia: N ([d726d8d](https://github.com/mariomina/.github/commit/d726d8d03cb1b3f5526af63e7ee002c8c5b5b652)), closes [#27](https://github.com/mariomina/.github/issues/27)
+
 ## [1.8.0](https://github.com/mariomina/.github/compare/v1.7.0...v1.8.0) (2026-11-16)
 
 
