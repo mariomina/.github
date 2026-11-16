@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.1](https://github.com/mariomina/.github/compare/v1.6.0...v1.6.1) (2026-11-16)
+
+
+### Correcciones
+
+* **scripts:** sin aviso de issue sin proyecto con un token de GitHub App ([5cdb5ef](https://github.com/mariomina/.github/commit/5cdb5ef0f352bfb7fd050759b4c1d931fadd91ff))
+* **scripts:** sin aviso de issue sin proyecto con un token de GitHub App ([dd11b52](https://github.com/mariomina/.github/commit/dd11b52642baa4c7d93ed358cd5bd5bd193321e2))
+
 ## [1.6.0](https://github.com/mariomina/.github/compare/v1.5.0...v1.6.0) (2026-11-16)
 
 
