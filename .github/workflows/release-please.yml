@@ -1,10 +1,14 @@
 # Workflow reutilizable: versión, changelog y release desde los commits de main.
 # El repo que lo llama tiene release-please-config.json y .release-please-manifest.json en su raíz
-# (componentes, changelog-sections y archivos de versión). Necesita «Allow GitHub Actions to create
-# and approve pull requests» en el repo (en la org ya está activado).
-# La PR de versión se fusiona sola (decisión de Mario, mariomina/mario-2-cerebro#280): el merge con GITHUB_TOKEN
-# no dispara otro workflow, así que una segunda pasada de release-please publica la versión en esta misma
-# ejecución. Si la fusión falla, el job falla; el barrido de mario-home (mantenimiento.yml) la reintenta y lo avisa.
+# (componentes, changelog-sections y archivos de versión) y le pasa el secreto APP_PRIVATE_KEY:
+#   secrets:
+#     APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+# Con él, release-please crea la PR de versión con un token de la GitHub App mariomina-automatizacion
+# (mariomina/mario-home#38): el CI corre en la PR, a diferencia de con GITHUB_TOKEN. El job espera ese CI y
+# fusiona la PR solo con statusCheckRollup = SUCCESS (mariomina/.github#28; decisión de fusión automática:
+# mariomina/mario-2-cerebro#280). El merge con el token de la App dispara `push`, y esa ejecución publica la
+# versión. Si el CI acaba después del plazo, la fusiona el barrido de mario-home (mantenimiento.yml).
+# Sin APP_PRIVATE_KEY, la PR se crea con GITHUB_TOKEN, sin CI, y espera a Mario.
 name: release-please
 
 on:
@@ -16,6 +20,10 @@ on:
       manifest-file:
         type: string
         default: .release-please-manifest.json
+    secrets:
+      APP_PRIVATE_KEY:
+        description: Clave privada de la GitHub App mariomina-automatizacion
+        required: false
     outputs:
       releases_created:
         value: ${{ jobs.release-please.outputs.releases_created }}
@@ -30,42 +38,47 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-slim
-    timeout-minutes: 10
+    timeout-minutes: 20
+    env:
+      HAY_APP: ${{ secrets.APP_PRIVATE_KEY != '' }}
     outputs:
-      releases_created: ${{ steps.rp.outputs.releases_created == 'true' || steps.rp2.outputs.releases_created == 'true' }}
-      major: ${{ steps.rp2.outputs.major || steps.rp.outputs.major }}
+      releases_created: ${{ steps.rp.outputs.releases_created }}
+      major: ${{ steps.rp.outputs.major }}
     steps:
+      # Token solo para este repo. El client ID no es secreto.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app
+        if: env.HAY_APP == 'true'
+        with:
+          client-id: Iv23lip8pbiVdk2GlCTs
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-checks: read
+          permission-statuses: read
+      - name: Aviso sin la App
+        if: env.HAY_APP != 'true'
+        run: echo "::warning::Sin APP_PRIVATE_KEY la PR de versión se crea con GITHUB_TOKEN, sin CI, y no se fusiona sola (mariomina/.github#28)"
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: rp
         with:
+          token: ${{ steps.app.outputs.token || github.token }}
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
       # La fusión es `github_pendientes.py --fusionar-version` (con tests en scripts/tests), desde la rama
       # principal de mariomina/.github, como agents-md.yml.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.rp.outputs.prs_created == 'true'
+        if: steps.rp.outputs.prs_created == 'true' && steps.app.outputs.token != ''
         with:
           repository: mariomina/.github
           path: .mantenimiento
           sparse-checkout: scripts/github_pendientes.py
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      - name: Fusionar la PR de versión
-        id: fusion
-        if: steps.rp.outputs.prs_created == 'true'
+      - name: Fusionar la PR de versión con CI en verde
+        if: steps.rp.outputs.prs_created == 'true' && steps.app.outputs.token != ''
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
           PRS: ${{ steps.rp.outputs.prs }}
         run: python3 -I .mantenimiento/scripts/github_pendientes.py --fusionar-version
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        id: rp2
-        if: ${{ !cancelled() && steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0' }}
-        with:
-          config-file: ${{ inputs.config-file }}
-          manifest-file: ${{ inputs.manifest-file }}
-          skip-github-pull-request: true
-      - name: Comprobar que la versión se publicó
-        if: ${{ !cancelled() && steps.fusion.outputs.fusionadas != '' && steps.fusion.outputs.fusionadas != '0' && steps.rp2.outputs.releases_created != 'true' }}
-        run: |
-          echo "::error::Se fusionó la PR de versión, pero release-please no publicó la versión en la segunda pasada"
-          exit 1

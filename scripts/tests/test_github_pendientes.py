@@ -66,7 +66,7 @@ class Clasificacion(unittest.TestCase):
             pr(1, "chore(main): release 1.1.0", "release-please--branches--main", "github-actions",
                edad=timedelta(minutes=2)),
             pr(2, "chore(master): release pkm 1.1.0", "release-please--branches--master--components--pkm",
-               "github-actions", edad=timedelta(minutes=30)),
+               "github-actions", ci="SUCCESS", edad=timedelta(minutes=30)),
             dependabot(3, "5.1", "5.2"),
             dependabot(4, "5.1", "5.2", ci="PENDING"),
             dependabot(5, "5.1", "5.2", ci=None),
@@ -75,6 +75,10 @@ class Clasificacion(unittest.TestCase):
             pr(8, "chore: Bump the x group with 2 updates", "dependabot/npm/g", "dependabot[bot]", ci="SUCCESS"),
             pr(9, "feat: algo", "feat/9-algo"),
             pr(10, "feat: borrador", "feat/10-b", borrador=True),
+            pr(11, "chore: release", "release-please--branches--a", "github-actions", edad=timedelta(minutes=30)),
+            pr(12, "chore: release", "release-please--branches--b", "mariomina-automatizacion[bot]", ci="FAILURE"),
+            pr(13, "chore: release", "release-please--branches--c", "mariomina-automatizacion", ci="PENDING"),
+            pr(14, "chore: release", "release-please--branches--d", "app/mariomina-automatizacion", ci="SUCCESS"),
         ])}
         estado = gp.analizar(nodos, [], AHORA)
         self.assertEqual(acciones(estado), {
@@ -82,7 +86,12 @@ class Clasificacion(unittest.TestCase):
             ("o/a", 3): ("dependabot-menor", "fusionar"), ("o/a", 4): ("dependabot-menor", "esperar"),
             ("o/a", 5): ("dependabot-menor", "decision"), ("o/a", 6): ("dependabot-menor", "decision"),
             ("o/a", 7): ("dependabot-mayor", "decision"), ("o/a", 8): ("dependabot-mayor", "decision"),
-            ("o/a", 9): ("trabajo", "decision"), ("o/a", 10): ("trabajo", "borrador")})
+            ("o/a", 9): ("trabajo", "decision"), ("o/a", 10): ("trabajo", "borrador"),
+            ("o/a", 11): ("version", "decision"), ("o/a", 12): ("version", "decision"),
+            ("o/a", 13): ("version", "esperar"), ("o/a", 14): ("version", "fusionar")})
+        motivos = {p["numero"]: p["motivo"] for p in estado["prs"] if p["clase"] == "version"}
+        self.assertEqual(motivos, {1: "CI en curso", 2: "CI en verde", 11: "PR de versión sin CI",
+                                   12: "PR de versión con CI rojo", 13: "CI en curso", 14: "CI en verde"})
 
     def test_ramas_de_version_o_dependabot_desde_un_fork_son_trabajo(self):
         rama_rp = "release-please--branches--main"
@@ -113,7 +122,8 @@ class Clasificacion(unittest.TestCase):
         nodos = {}
         for r, n, rama in version:
             nodos.setdefault(r, repo())["pullRequests"]["nodes"].append(
-                pr(n, "chore: release", f"release-please--branches--{rama}", "github-actions", edad=timedelta(hours=1)))
+                pr(n, "chore: release", f"release-please--branches--{rama}", "github-actions", ci="SUCCESS",
+                   edad=timedelta(hours=1)))
         nodos["mariomina/.github"] = repo([dependabot(1, "6", "7", ci=None), dependabot(2, "4", "5"),
                                            dependabot(3, "5", "6", ci=None), dependabot(4, "5", "7")])
         estado = gp.analizar(nodos, [], AHORA)
@@ -175,7 +185,7 @@ class Fusion(unittest.TestCase):
     def test_fusiona_con_sha_y_metodo_y_sigue_tras_un_error(self):
         nodos = {"o/a": repo([dependabot(3, "5.1", "5.2"), dependabot(7, "5", "7")], merge=False),
                  "o/b": repo([pr(2, "chore: release", "release-please--branches--main", "github-actions",
-                                 edad=timedelta(hours=1))])}
+                                 ci="SUCCESS", edad=timedelta(hours=1))])}
         estado = gp.analizar(nodos, [], AHORA)
         llamadas = []
 
@@ -204,7 +214,8 @@ class Fusion(unittest.TestCase):
 
     def test_main_fusionar_registra_las_fusionadas_y_sale_con_1_si_alguna_falla(self):
         nodos = {"o/a": repo([dependabot(3, "5.1", "5.2")]),
-                 "o/b": repo([pr(2, "chore: release", "release-please--branches--main", "github-actions")])}
+                 "o/b": repo([pr(2, "chore: release", "release-please--branches--main", "github-actions",
+                                 ci="SUCCESS")])}
         estado = gp.analizar(nodos, [], AHORA)
 
         def http(metodo, url, token, cuerpo=None):
@@ -285,7 +296,7 @@ class Linea(unittest.TestCase):
     def test_decisiones_y_cache_caducada(self):
         nodos = {"mariomina/.github": repo([dependabot(1, "6", "7"), dependabot(2, "4", "5")]),
                  "Escala-Agencia/agencia-web": repo([pr(2, "chore: release", "release-please--branches--main",
-                                               "github-actions")])}
+                                               "github-actions", ci="SUCCESS")])}
         gp.guardar_cache(gp.analizar(nodos, [], AHORA - timedelta(minutes=30)), self.cache)
         self.assertEqual(self.linea(), "GitHub: 2 esperan tu decisión: Dependabot mayor (.github#1, .github#2) · "
                                        "1 se fusionan solas · hace 30 min")
@@ -343,16 +354,27 @@ def error_http(codigo, mensaje):
     return urllib.error.HTTPError("u", codigo, "x", {}, io.BytesIO(json.dumps({"message": mensaje}).encode()))
 
 
+def lectura(ci=None, estado="OPEN", fusionada=False, sha="s1"):
+    """Respuesta GraphQL de estado_pr_version."""
+    commit = {"statusCheckRollup": {"state": ci} if ci else None}
+    return {"data": {"repository": {"pullRequest": {"state": estado, "merged": fusionada, "headRefOid": sha,
+                                                    "commits": {"nodes": [{"commit": commit}]}}}}}
+
+
 class FusionarVersion(unittest.TestCase):
-    """`--fusionar-version`: el paso del job reutilizable release-please (antes JavaScript sin tests)."""
+    """`--fusionar-version`: espera el CI de la PR de versión y la fusiona solo en verde (mariomina/.github#28)."""
 
     def correr(self, respuestas, prs='[{"number": 8}]'):
-        """respuestas: {número: [respuesta o excepción por llamada PUT/GET, en orden]}."""
+        """respuestas: {número: [respuesta o excepción por llamada (lectura GraphQL o PUT), en orden]}."""
         llamadas, esperas = [], []
 
         def http(metodo, url, token, cuerpo=None):
-            numero = int(url.split("/pulls/")[1].split("/")[0])
-            llamadas.append((metodo, numero, (cuerpo or {}).get("merge_method")))
+            if metodo == "POST":
+                numero = cuerpo["variables"]["pr"]
+                llamadas.append(("LEER", numero, None))
+            else:
+                numero = int(url.split("/pulls/")[1].split("/")[0])
+                llamadas.append((metodo, numero, cuerpo))
             r = respuestas[numero].pop(0)
             if isinstance(r, Exception):
                 raise r
@@ -364,47 +386,55 @@ class FusionarVersion(unittest.TestCase):
             codigo = gp.fusionar_version(prs, "o/r", "t", str(salida), esperas.append)
             return codigo, salida.read_text(), llamadas, esperas
 
-    def test_fusiona_con_merge_y_espera_antes_de_la_segunda_pasada(self):
-        codigo, salida, llamadas, esperas = self.correr({8: [{"merged": True}]})
-        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [10]))
-        self.assertEqual(llamadas, [("PUT", 8, "merge")])
+    def test_espera_al_ci_y_fusiona_en_verde_con_el_sha_revisado(self):
+        codigo, salida, llamadas, esperas = self.correr(
+            {8: [lectura(), lectura("PENDING"), lectura("SUCCESS", sha="s2"), {"merged": True}]})
+        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [15, 15]))
+        self.assertEqual(llamadas[-1], ("PUT", 8, {"merge_method": "merge", "sha": "s2"}))
+
+    def test_ci_rojo_no_fusiona_y_sale_con_1(self):
+        codigo, salida, llamadas, _ = self.correr({8: [lectura("PENDING"), lectura("FAILURE")]})
+        self.assertEqual((codigo, salida), (1, "fusionadas=0\n"))
+        self.assertNotIn("PUT", [m for m, _, _ in llamadas])
+
+    def test_sin_ci_tras_2_min_no_fusiona(self):
+        codigo, salida, llamadas, esperas = self.correr({8: [lectura() for _ in range(9)]})
+        self.assertEqual((codigo, salida), (1, "fusionadas=0\n"))
+        self.assertEqual(len(esperas), 8)  # 8 × 15 s = 2 min
+        self.assertEqual({m for m, _, _ in llamadas}, {"LEER"})
+
+    def test_ci_en_curso_al_acabar_el_plazo_lo_deja_al_barrido(self):
+        codigo, salida, llamadas, esperas = self.correr({8: [lectura("PENDING") for _ in range(41)]})
+        self.assertEqual((codigo, salida, len(esperas)), (0, "fusionadas=0\n", 40))  # 40 × 15 s = 10 min
 
     def test_prueba_el_siguiente_metodo_si_el_repo_no_lo_permite(self):
         codigo, salida, llamadas, _ = self.correr(
-            {8: [error_http(405, "Merge commits are not allowed on this repository."), {"merged": True}]})
+            {8: [lectura("SUCCESS"), error_http(405, "Merge commits are not allowed on this repository."),
+                 {"merged": True}]})
         self.assertEqual((codigo, salida), (0, "fusionadas=1\n"))
-        self.assertEqual(llamadas, [("PUT", 8, "merge"), ("PUT", 8, "squash")])
+        self.assertEqual([c["merge_method"] for m, _, c in llamadas if m == "PUT"], ["merge", "squash"])
 
-    def test_reintenta_mientras_no_es_fusionable_y_detecta_ya_fusionada(self):
-        no_aun = lambda: error_http(405, "Pull Request is not mergeable")  # noqa: E731 - un cuerpo por respuesta
+    def test_cabeza_cambiada_vuelve_a_leer_y_detecta_ya_fusionada(self):
         codigo, salida, llamadas, esperas = self.correr(
-            {8: [no_aun(), {"merged": False}, no_aun(), {"merged": True}]})
-        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [5, 10]))
-        self.assertEqual([m for m, _, _ in llamadas], ["PUT", "GET", "PUT", "GET"])
-
-    def test_tras_4_intentos_falla_pero_escribe_fusionadas_y_sigue_con_las_demas(self):
-        respuestas = [r for _ in range(4) for r in (error_http(409, "Head branch was modified"), {"merged": False})]
-        codigo, salida, llamadas, esperas = self.correr(
-            {8: respuestas, 9: [{"merged": True}]}, prs='[{"number": 8}, {"number": 9}]')
-        self.assertEqual((codigo, salida), (1, "fusionadas=1\n"))
-        self.assertEqual(esperas, [5, 5, 5, 10])
-        self.assertEqual(llamadas[-1], ("PUT", 9, "merge"))
-
-    def test_ningun_metodo_permitido_falla_sin_reintentar(self):
-        no = [error_http(405, f"{m} merges are not allowed") for m in ("Merge", "Squash", "Rebase")]
-        codigo, salida, llamadas, esperas = self.correr({8: no + [{"merged": False}]})
-        self.assertEqual((codigo, salida, esperas), (1, "fusionadas=0\n", []))
-        self.assertEqual(llamadas, [("PUT", 8, "merge"), ("PUT", 8, "squash"), ("PUT", 8, "rebase"), ("GET", 8, None)])
-
-    def test_un_error_de_red_se_comprueba_con_el_get_y_se_reintenta(self):
-        codigo, salida, llamadas, esperas = self.correr(
-            {8: [TimeoutError("timed out"), {"merged": False}, {"merged": True}]})
-        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [5, 10]))
-        self.assertEqual([m for m, _, _ in llamadas], ["PUT", "GET", "PUT"])
+            {8: [lectura("SUCCESS"), error_http(409, "Head branch was modified"), lectura(fusionada=True)]})
+        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [15]))
 
     def test_un_put_que_llego_aunque_dio_timeout_cuenta_como_fusionada(self):
-        codigo, salida, _, esperas = self.correr({8: [TimeoutError("timed out"), {"merged": True}]})
-        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [10]))
+        codigo, salida, _, esperas = self.correr(
+            {8: [lectura("SUCCESS"), TimeoutError("timed out"), lectura(fusionada=True)]})
+        self.assertEqual((codigo, salida, esperas), (0, "fusionadas=1\n", [15]))
+
+    def test_ningun_metodo_permitido_falla(self):
+        no = [error_http(405, f"{m} merges are not allowed") for m in ("Merge", "Squash", "Rebase")]
+        codigo, salida, llamadas, esperas = self.correr({8: [lectura("SUCCESS")] + no})
+        self.assertEqual((codigo, salida, esperas), (1, "fusionadas=0\n", []))
+
+    def test_cerrada_sin_fusionar_falla_y_sigue_con_las_demas(self):
+        codigo, salida, llamadas, _ = self.correr(
+            {8: [lectura(estado="CLOSED")], 9: [lectura("SUCCESS"), {"merged": True}]},
+            prs='[{"number": 8}, {"number": 9}]')
+        self.assertEqual((codigo, salida), (1, "fusionadas=1\n"))
+        self.assertEqual(llamadas[-1][:2], ("PUT", 9))
 
     def test_main_lee_prs_y_escribe_github_output(self):
         with tempfile.TemporaryDirectory() as d:
@@ -441,7 +471,7 @@ class LogPublico(unittest.TestCase):
 
     def test_main_fusionar_en_log_publico_no_nombra_repos_ni_titulos(self):
         nodos = {"o/secreto": repo([pr(2, "chore: release cliente-acme", "release-please--branches--main",
-                                       "github-actions", edad=timedelta(hours=2))],
+                                       "github-actions", ci="SUCCESS", edad=timedelta(hours=2))],
                                    issues=[(7, 0)], ramas=[("feat/cliente-acme", timedelta(days=30))]),
                  "o/otro": repo([dependabot(3, "5", "7")])}
         estado = gp.analizar(nodos, [], AHORA)
