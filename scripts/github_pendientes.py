@@ -15,7 +15,8 @@ ramas ni títulos). El barrido programado vive en mario-home (privado) por eso.
 Repos: mario-home y los punteros de su AGENTS.md, en cascada por los home repos (`punteros` de
 filtro_global.py). Cada AGENTS.md se lee por la API (rama principal): un clon local puede estar atrasado.
 
-Uso (token: GH_TOKEN, GITHUB_TOKEN o `gh auth token`):
+Uso (token: GH_TOKEN, GITHUB_TOKEN o `gh auth token`; GH_TOKEN_<DUEÑO>, p. ej. GH_TOKEN_ESCALA_AGENCIA, manda
+en los repos de ese dueño: un token de GitHub App vale para una sola cuenta):
   github_pendientes.py              tabla
   github_pendientes.py --json       todo en JSON
   github_pendientes.py --fusionar   fusiona lo que se fusiona solo, después la tabla; salida 1 si alguna falla
@@ -99,6 +100,12 @@ def obtener_token():
     return p.stdout.strip() or None
 
 
+def token_de(repo, token):
+    """GH_TOKEN_<DUEÑO> para `owner/repo` si existe; si no, `token`. Mismo criterio que filtro_global.token."""
+    dueno = re.sub(r"\W", "_", repo.split("/")[0]).upper()
+    return os.environ.get(f"GH_TOKEN_{dueno}") or token
+
+
 def cargar_filtro():
     """filtro_global.py por ruta: con `python3 -I` la carpeta del script no está en sys.path."""
     spec = importlib.util.spec_from_file_location("filtro_global", Path(__file__).resolve().parent / "filtro_global.py")
@@ -126,16 +133,20 @@ def repos(filtro):
 
 
 def consultar(nombres, token):
-    """{owner/repo: nodo GraphQL o None} y [errores por repo], en una sola consulta con alias."""
+    """{owner/repo: nodo GraphQL o None} y [errores por repo], en una consulta con alias por token."""
     alias = {f"r{i}": n for i, n in enumerate(nombres)}
-    campos = " ".join(f'{a}: repository(owner: "{n.split("/")[0]}", name: "{n.split("/")[1]}") {{ ...R }}'
-                      for a, n in alias.items())
-    d = http("POST", f"{API}/graphql", token, {"query": f"query {{ {campos} }}\n{FRAGMENTO}"})
-    datos = d.get("data") or {}
-    errores = []
-    for e in d.get("errors") or []:
-        repo = alias.get((e.get("path") or [""])[0], "?")
-        errores.append({"repo": repo, "detalle": e.get("message", "")[:160]})
+    grupos = {}
+    for a, n in alias.items():
+        grupos.setdefault(token_de(n, token), []).append(a)
+    datos, errores = {}, []
+    for t, nombres_alias in grupos.items():
+        campos = " ".join(f'{a}: repository(owner: "{alias[a].split("/")[0]}", name: "{alias[a].split("/")[1]}") '
+                          "{ ...R }" for a in nombres_alias)
+        d = http("POST", f"{API}/graphql", t, {"query": f"query {{ {campos} }}\n{FRAGMENTO}"})
+        datos.update(d.get("data") or {})
+        for e in d.get("errors") or []:
+            repo = alias.get((e.get("path") or [""])[0], "?")
+            errores.append({"repo": repo, "detalle": e.get("message", "")[:160]})
     if not datos and errores:
         raise Fallo(errores[0]["detalle"])
     return {n: datos.get(a) for a, n in alias.items()}, errores
@@ -254,7 +265,7 @@ def workflows_desactivados(nombres, token):
     avisos = []
     for repo in nombres:
         try:
-            d = http("GET", f"{API}/repos/{repo}/actions/workflows?per_page=100", token)
+            d = http("GET", f"{API}/repos/{repo}/actions/workflows?per_page=100", token_de(repo, token))
         except (OSError, ValueError):  # sin acceso o sin red: este refresco no lo comprueba; el siguiente sí
             continue
         for w in d.get("workflows") or []:
@@ -293,7 +304,7 @@ def fusionar(estado, token, discreto=False):
     for e in [p for p in estado["prs"] if p["accion"] == "fusionar"]:
         etiqueta = "una PR" if discreto else f"{e['repo']}#{e['numero']}"
         try:
-            http("PUT", f"{API}/repos/{e['repo']}/pulls/{e['numero']}/merge", token,
+            http("PUT", f"{API}/repos/{e['repo']}/pulls/{e['numero']}/merge", token_de(e["repo"], token),
                  {"merge_method": e.get("metodo") or "merge", "sha": e["sha"]})
         except urllib.error.HTTPError as x:
             motivo = _motivo(x)

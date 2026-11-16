@@ -122,6 +122,11 @@ class FiltroGlobal(unittest.TestCase):
         self.assertTrue(r["valido"], r["violaciones"])
         self.assertEqual([a["repo"] for a in r["avisos"]], ["agencia-web"])
 
+    def test_token_por_dueno(self):
+        with mock.patch.dict("os.environ", {"GH_TOKEN": "t", "GH_TOKEN_ESCALA_AGENCIA": "te"}):
+            self.assertEqual(filtro.token("Escala-Agencia/agencia-web"), "te")
+            self.assertEqual(filtro.token("mariomina/mario-home"), "t")
+
     def test_modo_repo(self):
         d = self.repo("a", "# a\n\nSin tipo.\n")
         self.assertEqual([v["regla"] for v in filtro.modo_repo(str(d))["violaciones"]], ["sin-tipo-repo"])
