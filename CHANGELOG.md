@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.0](https://github.com/mariomina/.github/compare/v1.6.2...v1.7.0) (2026-11-16)
+
+
+### Novedades
+
+* **scripts:** métricas del sistema de agentes en github_pendientes.py ([1d4e922](https://github.com/mariomina/.github/commit/1d4e92221462f2d4c5bb67ed524c23da16d6f4db))
+* **scripts:** métricas del sistema de agentes en github_pendientes.py ([667700e](https://github.com/mariomina/.github/commit/667700ea7448d1e1c10e7bc33872c3b89c10a855))
+
 ## [1.6.2](https://github.com/mariomina/.github/compare/v1.6.1...v1.6.2) (2026-11-16)
 
 
