@@ -601,6 +601,101 @@ class FusionarVersion(unittest.TestCase):
             self.assertEqual(gp.main(["--fusionar-version"]), 1)
 
 
+def corrida(conclusion, inicio, nombre="pr", workflow="pr", evento="pull_request", status="COMPLETED"):
+    """CheckRun de `statusCheckRollup.contexts`."""
+    return {"__typename": "CheckRun", "name": nombre, "status": status,
+            "conclusion": conclusion if status == "COMPLETED" else None, "startedAt": inicio,
+            "checkSuite": {"workflowRun": {"event": evento, "workflow": {"name": workflow}}}}
+
+
+def rollup(estado, *nodos, total=None):
+    return {"state": estado, "contexts": {"totalCount": len(nodos) if total is None else total, "nodes": list(nodos)}}
+
+
+# mariomina/.github#51, head d681f95: 1 `pr` FAILURE antigua (run 72) y 4 `pr` SUCCESS; GitHub da FAILURE.
+CASO_51 = rollup("FAILURE", corrida("FAILURE", "2026-11-18T18:03:50Z"), corrida("SUCCESS", "2026-11-18T18:01:43Z"),
+                 corrida("SUCCESS", "2026-11-18T18:04:28Z"), corrida("SUCCESS", "2026-11-18T18:05:14Z"),
+                 corrida("SUCCESS", "2026-11-18T18:05:27Z"))
+
+
+class EstadoCi(unittest.TestCase):
+    """El estado del CI usa la ejecución más reciente de cada check, como `gh pr checks` (mariomina/mario-home#134)."""
+
+    def test_caso_51_la_ejecucion_roja_antigua_no_cuenta(self):
+        self.assertEqual(gp.estado_ci(CASO_51), "SUCCESS")
+
+    def test_la_mas_reciente_roja_si_cuenta(self):
+        self.assertEqual(gp.estado_ci(rollup("FAILURE", corrida("SUCCESS", "2026-11-18T18:01:00Z"),
+                                             corrida("CANCELLED", "2026-11-18T18:02:00Z"))), "FAILURE")
+
+    def test_otro_workflow_u_otro_evento_es_otro_check(self):
+        for otro in ({"workflow": "ci"}, {"evento": "push"}):
+            r = rollup("FAILURE", corrida("FAILURE", "2026-11-18T18:01:00Z", **otro),
+                       corrida("SUCCESS", "2026-11-18T18:02:00Z"))
+            self.assertEqual(gp.estado_ci(r), "FAILURE", otro)
+
+    def test_en_curso_mas_reciente(self):
+        self.assertEqual(gp.estado_ci(rollup("PENDING", corrida("SUCCESS", "2026-11-18T18:01:00Z"),
+                                             corrida(None, "2026-11-18T18:02:00Z", status="IN_PROGRESS"))), "PENDING")
+
+    def test_sin_fecha_cuenta_siempre(self):
+        # gh pone un check sin fecha como el más antiguo: un verde sin fecha nunca tapa un rojo con fecha
+        for orden in ((("SUCCESS", "2026-11-18T18:01:00Z"), ("FAILURE", None)),
+                      (("FAILURE", "2026-11-18T18:01:00Z"), ("SUCCESS", None))):
+            self.assertEqual(gp.estado_ci(rollup("FAILURE", *(corrida(*c) for c in orden))), "FAILURE", orden)
+        self.assertEqual(gp.estado_ci(rollup("SUCCESS", corrida("SUCCESS", None))), "SUCCESS")
+
+    def test_empate_en_la_fecha_mas_reciente_cuentan_todos(self):
+        t = "2026-11-18T18:01:00Z"  # p. ej. `opened` y `labeled` en el mismo segundo; gh no ordena estable
+        for orden in ((("SUCCESS", t), ("FAILURE", t)), (("FAILURE", t), ("SUCCESS", t))):
+            self.assertEqual(gp.estado_ci(rollup("FAILURE", corrida("FAILURE", "2026-11-18T18:00:00Z"),
+                                                 *(corrida(*c) for c in orden))), "FAILURE", orden)
+        self.assertEqual(gp.estado_ci(rollup("FAILURE", corrida("FAILURE", "2026-11-18T18:00:00Z"),
+                                             corrida("SUCCESS", t), corrida("SUCCESS", t))), "SUCCESS")
+
+    def test_status_context_y_saltados(self):
+        estado = {"__typename": "StatusContext", "context": "ci/x", "state": "SUCCESS",
+                  "createdAt": "2026-11-18T18:00:00Z"}
+        saltado = corrida("SKIPPED", "2026-11-18T18:01:00Z", nombre="opcional")
+        self.assertEqual(gp.estado_ci(rollup("SUCCESS", estado, saltado)), "SUCCESS")
+        self.assertEqual(gp.estado_ci(rollup("SUCCESS", dict(estado, state="ERROR"))), "FAILURE")
+        self.assertEqual(gp.estado_ci(rollup("PENDING", dict(estado, state="EXPECTED"))), "PENDING")
+        self.assertIsNone(gp.estado_ci(rollup("SUCCESS", saltado)))  # ningún check probó nada
+
+    def test_sin_checks_o_lista_incompleta(self):
+        self.assertIsNone(gp.estado_ci(None))
+        self.assertIsNone(gp.estado_ci(rollup(None)))
+        self.assertEqual(gp.estado_ci(rollup("FAILURE", *CASO_51["contexts"]["nodes"], total=101)), "FAILURE")
+        self.assertEqual(gp.estado_ci({"state": "PENDING"}), "PENDING")  # sin contexts: el de GitHub
+
+    def test_las_consultas_piden_los_checks_con_su_fecha(self):
+        for consulta in (gp.FRAGMENTO, gp.PR_VERSION):
+            self.assertIn("contexts(first: 100)", consulta)
+            self.assertIn("startedAt", consulta)
+            self.assertNotIn("ROLLUP", consulta)
+
+    def test_barrido_fusiona_la_pr_de_version_del_caso_51(self):
+        v = version(9)
+        v["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = CASO_51
+        e = gp.analizar({"o/a": repo([v])}, [], AHORA)["prs"][0]
+        self.assertEqual((e["accion"], e["ci"]), ("fusionar", "SUCCESS"))
+
+    def test_fusionar_version_fusiona_el_caso_51(self):
+        leida = lectura(sha="d681f95")
+        leida["data"]["repository"]["pullRequest"]["commits"]["nodes"][0]["commit"]["statusCheckRollup"] = CASO_51
+        llamadas = []
+
+        def http(metodo, url, token, cuerpo=None):
+            if url.endswith("/issues?state=open&per_page=100"):
+                return []
+            llamadas.append((metodo, cuerpo if metodo == "PUT" else None))
+            return leida if metodo == "POST" else {"merged": True}
+
+        with mock.patch.object(gp, "http", http), mock.patch("builtins.print"):
+            self.assertEqual(gp.fusionar_version('[{"number": 51}]', "o/r", "t", None, lambda _: None), 0)
+        self.assertEqual(llamadas[-1], ("PUT", {"merge_method": "squash", "sha": "d681f95"}))
+
+
 class LogPublico(unittest.TestCase):
     def test_solo_en_actions_y_si_el_repo_no_es_privado(self):
         def http_privado(privado):
