@@ -248,7 +248,8 @@ def clasificar_pr(repo, pr, ahora):
         elif ci == "SUCCESS":
             e.update(accion="decision", motivo="Dependabot: falta veredicto y permiso")
         elif ci in ("PENDING", "EXPECTED"):
-            e.update(accion="esperar", motivo="CI en curso")
+            # «esperar» cuenta como «se fusiona sola» en el informe: Dependabot nunca lo hace (#134)
+            e.update(accion="decision", motivo="Dependabot: CI en curso; falta veredicto y permiso")
         else:
             e.update(accion="decision", motivo="Dependabot con CI rojo" if ci else "Dependabot sin CI")
     elif pr.get("isDraft"):

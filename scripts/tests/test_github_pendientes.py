@@ -89,7 +89,7 @@ class Clasificacion(unittest.TestCase):
         estado = gp.analizar(nodos, [], AHORA)
         self.assertEqual(acciones(estado), {
             ("o/a", 1): ("version", "esperar"), ("o/a", 2): ("version", "fusionar"),
-            ("o/a", 3): ("dependabot-menor", "decision"), ("o/a", 4): ("dependabot-menor", "esperar"),
+            ("o/a", 3): ("dependabot-menor", "decision"), ("o/a", 4): ("dependabot-menor", "decision"),
             ("o/a", 5): ("dependabot-menor", "decision"), ("o/a", 6): ("dependabot-menor", "decision"),
             ("o/a", 7): ("dependabot-mayor", "decision"), ("o/a", 8): ("dependabot-mayor", "decision"),
             ("o/a", 9): ("trabajo", "decision"), ("o/a", 10): ("trabajo", "borrador"),
