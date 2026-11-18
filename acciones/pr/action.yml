@@ -1,6 +1,7 @@
 # Acción compuesta: los checks de PR de todos los repos en un solo job (mariomina/mario-home#134, P1).
 # GitHub redondea cada job a 1 min: un job con pasos cuesta 1 redondeo; 3 jobs reutilizables, 3.
-# Uso (el job hace antes `actions/checkout`; los pasos propios del repo van después con `if: ${{ !cancelled() }}`):
+# Uso (el job hace antes `actions/checkout` y declara `permissions: pull-requests: read`, que el paso del título
+# necesita; los pasos propios del repo van después con `if: ${{ !cancelled() }}`):
 #   - uses: mariomina/.github/acciones/pr@v1
 #     with:
 #       agents-md: "false"   # si el filtro global ya comprueba el AGENTS.md del repo (mario-home)
