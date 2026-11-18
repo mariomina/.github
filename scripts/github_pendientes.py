@@ -1,10 +1,11 @@
 """Pendientes de GitHub en los repos de Mario: qué se fusiona solo, qué espera su decisión y qué se avisa.
 
 Decisiones de Mario (mariomina/mario-2-cerebro#280):
-  - PR de versión (release-please): se fusiona sola, solo con CI en verde (statusCheckRollup = SUCCESS,
-    mariomina/.github#28). La crea y la fusiona el job reutilizable con el token de la GitHub App
-    mariomina-automatizacion (el CI corre en la PR y el merge dispara la versión); si su CI acaba después,
-    la fusiona `--fusionar`. CI rojo o sin CI tras 10 min: espera la decisión de Mario.
+  - PR de versión (release-please): se fusiona sola, solo con CI en verde (mariomina/.github#28): la ejecución
+    más reciente de cada check del head, como `gh pr checks` (mariomina/mario-home#134). La crea y la fusiona
+    el job reutilizable con el token de la GitHub App mariomina-automatizacion (el CI corre en la PR y el merge
+    dispara la versión); si su CI acaba después, la fusiona `--fusionar`. CI rojo o sin CI tras 10 min: espera
+    la decisión de Mario.
   - Dependabot: espera el veredicto de un verificador y el permiso de Mario, como una PR de trabajo (pstack:
     el CI en verde solo no autoriza una fusión; decisión de Mario en mariomina/mario-home#134). La tabla dice
     si es de parche, menor o mayor (título sin semver o versión 0.x: mayor).
@@ -74,8 +75,17 @@ ESPERA_CI = timedelta(minutes=10)        # `--fusionar-version` espera al CI de 
 SIN_CI = timedelta(minutes=2)            # sin ningún check tras este tiempo: la PR no tiene CI
 SONDEO = 15                              # segundos entre lecturas del CI
 AUTORES_VERSION = {"github-actions", "mariomina-automatizacion"}  # GITHUB_TOKEN o la GitHub App (#28)
+# Checks del head con su fecha: GraphQL no quita los duplicados de un mismo head (`edited`, `reopened`, re-runs).
+ROLLUP = """statusCheckRollup { state contexts(first: 100) { totalCount nodes { __typename
+      ... on CheckRun { name status conclusion startedAt checkSuite { workflowRun { event workflow { name } } } }
+      ... on StatusContext { context state createdAt } } } }"""
 PR_VERSION = """query($o: String!, $n: String!, $pr: Int!) { repository(owner: $o, name: $n) {
-  pullRequest(number: $pr) { state merged headRefOid commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }"""
+  pullRequest(number: $pr) { state merged headRefOid commits(last: 1) { nodes { commit { ROLLUP } } } } } }""".replace(
+    "ROLLUP", ROLLUP)
+# Estado de cada check como lo agrupa `gh pr checks` (bucket); STARTUP_FAILURE, además, cuenta como rojo.
+ROJO = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
+VERDE = {"SUCCESS"}
+SALTADO = {"SKIPPED", "NEUTRAL"}
 RE_SALTO = re.compile(r"\bfrom (\S+) to (\S+)", re.I)
 RE_VERSION = re.compile(r"v?(\d+(?:\.\d+)*)")
 RE_REVERT = re.compile(r'^(revert(\(.+\))?!?:|Revert ")', re.I)
@@ -95,11 +105,11 @@ FRAGMENTO = """fragment R on Repository {
   defaultBranchRef { name target { ... on Commit { history(first: 5) { nodes { statusCheckRollup { state } } } } } }
   pullRequests(states: OPEN, first: 50) { nodes {
     number title url createdAt updatedAt isDraft isCrossRepository headRefName headRefOid author { login }
-    commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } }
+    commits(last: 1) { nodes { commit { ROLLUP } } } } }
   refs(refPrefix: "refs/heads/", first: 100, orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
     nodes { name target { ... on Commit { committedDate } } } }
   issues(states: OPEN, first: 100) { nodes { number title url projectItems(first: 1) { totalCount } } }
-}"""
+}""".replace("ROLLUP", ROLLUP)
 
 
 class Fallo(Exception):
@@ -225,10 +235,45 @@ def _es_dependabot(pr):
     return _autor(pr) == "dependabot" and pr.get("isCrossRepository") is False
 
 
+def _cuando(contexto):
+    """Fecha de un check (ISO, comparable como texto). Sin fecha cuenta como el más reciente: lado seguro."""
+    return contexto.get("startedAt") or contexto.get("createdAt") or "9999"
+
+
+def estado_ci(rollup):
+    """SUCCESS · PENDING · FAILURE o None (sin checks, o ninguno en verde) del `statusCheckRollup` de un commit,
+    con la ejecución más reciente de cada check, como `gh pr checks`: un mismo nombre (y workflow y evento)
+    puede tener varias ejecuciones en el mismo head y el `state` de GitHub las cuenta todas (mariomina/.github#51:
+    1 `pr` FAILURE antigua + 4 `pr` SUCCESS daba FAILURE). Sin la lista completa de checks: el `state` de GitHub."""
+    if not rollup:
+        return None
+    contextos = rollup.get("contexts") or {}
+    nodos = contextos.get("nodes")
+    if nodos is None or len(nodos) < (contextos.get("totalCount") or 0):
+        return rollup.get("state")
+    vistos, estados = set(), set()
+    for c in sorted(nodos, key=_cuando, reverse=True):
+        if c.get("__typename") == "StatusContext" or "context" in c:
+            clave, estado = ("status", c.get("context")), c.get("state")
+        else:
+            corrida = ((c.get("checkSuite") or {}).get("workflowRun")) or {}
+            clave = ("check", c.get("name"), ((corrida.get("workflow") or {}).get("name")), corrida.get("event"))
+            estado = c.get("conclusion") if c.get("status") == "COMPLETED" else c.get("status")
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        estados.add("rojo" if estado in ROJO else "verde" if estado in VERDE else
+                    "saltado" if estado in SALTADO else "en curso")
+    if "rojo" in estados:
+        return "FAILURE"
+    if "en curso" in estados:
+        return "PENDING"
+    return "SUCCESS" if "verde" in estados else None  # solo saltados: ningún check probó nada (frontera.py igual)
+
+
 def clasificar_pr(repo, pr, ahora):
     """Entrada de la tabla: clase, acción (fusionar · esperar · decision · borrador · nada) y motivo."""
-    ci = ((((pr.get("commits") or {}).get("nodes") or [{}])[0].get("commit") or {}).get("statusCheckRollup")
-          or {}).get("state")
+    ci = estado_ci((((pr.get("commits") or {}).get("nodes") or [{}])[0].get("commit") or {}).get("statusCheckRollup"))
     e = {"repo": repo, "numero": pr["number"], "titulo": pr["title"], "url": pr.get("url"),
          "sha": pr.get("headRefOid"), "ci": ci, "creada": pr.get("createdAt")}
     if _es_version(pr):
@@ -471,7 +516,7 @@ def fusionar(estado, token, discreto=False):
 
 
 def estado_pr_version(repo, numero, token):
-    """(state, merged, sha de la cabeza, statusCheckRollup de ese commit o None) de una PR."""
+    """(state, merged, sha de la cabeza, estado_ci de ese commit) de una PR."""
     dueno, nombre = repo.split("/")
     d = http("POST", f"{API}/graphql", token,
              {"query": PR_VERSION, "variables": {"o": dueno, "n": nombre, "pr": numero}})
@@ -479,7 +524,7 @@ def estado_pr_version(repo, numero, token):
     if not p:
         raise Fallo(f"#{numero}: no se puede leer la PR ({((d.get('errors') or [{}])[0]).get('message', '')})")
     commit = (((p.get("commits") or {}).get("nodes") or [{}])[0] or {}).get("commit") or {}
-    return p["state"], p["merged"], p["headRefOid"], (commit.get("statusCheckRollup") or {}).get("state")
+    return p["state"], p["merged"], p["headRefOid"], estado_ci(commit.get("statusCheckRollup"))
 
 
 def _fusionar_sha(repo, numero, token, sha):
@@ -504,7 +549,7 @@ def _fusionar_sha(repo, numero, token, sha):
 
 
 def fusionar_pr_version(repo, numero, token, esperar=None, plazo=ESPERA_CI):
-    """Espera al CI de una PR de versión y la fusiona solo con statusCheckRollup = SUCCESS, con el sha que
+    """Espera al CI de una PR de versión y la fusiona solo con estado_ci = SUCCESS, con el sha que
     pasó el CI (mariomina/.github#28). Devuelve el método, «ya estaba fusionada» o None si el CI sigue en
     curso al acabar el plazo (la fusiona el barrido). Fallo con CI rojo, sin CI o si no se puede fusionar."""
     esperar = esperar or time.sleep
