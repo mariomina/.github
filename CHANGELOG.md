@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/mariomina/.github/compare/v1.10.1...v1.11.0) (2026-11-18)
+
+
+### Novedades
+
+* **filtro:** exigir autonomia: N en cada repo apuntado ([#47](https://github.com/mariomina/.github/issues/47)) ([40a4e83](https://github.com/mariomina/.github/commit/40a4e835a40182c32504063857711da39a854307))
+
 ## [1.10.1](https://github.com/mariomina/.github/compare/v1.10.0...v1.10.1) (2026-11-18)
 
 
