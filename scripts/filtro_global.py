@@ -12,8 +12,8 @@ Modos:
                           GH_TOKEN_ESCALA_AGENCIA) manda sobre GH_TOKEN en los repos de ese dueño.
   --repo RUTA             Solo la estructura de un repo: AGENTS.md, tipo-repo y excepciones (PR de cada repo).
 
-Violaciones (salida 1): repo apuntado sin AGENTS.md o sin tipo-repo válido; `autonomia: N` fuera de 0–2, o
-distinto de 0 en un home repo o en .github (mariomina/mario-home#19; sin declarar, de momento pasa); regla global repetida
+Violaciones (salida 1): repo apuntado sin AGENTS.md o sin tipo-repo válido; `autonomia: N` sin declarar, fuera de 0–2,
+o distinto de 0 en un home repo o en .github (mariomina/mario-home#19); regla global repetida
 en un repo; repo que declara una excepción a una regla global.
 Avisos (salida 0): repo con git en ~/Documentos/Mario (o en una carpeta de grupo sin git, como
 mario-agencia/) que no está en ningún puntero.
@@ -108,7 +108,10 @@ def revisar_estructura(nombre, texto, violaciones):
         violaciones.append({"repo": nombre, "regla": "sin-tipo-repo",
                             "detalle": f"falta «tipo-repo: <{'|'.join(sorted(TIPOS))}>»"})
     autonomia = RE_AUTONOMIA.search(texto)
-    if autonomia and autonomia.group(1) not in NIVELES:
+    if not autonomia and tipo and tipo.group(1) in TIPOS:
+        violaciones.append({"repo": nombre, "regla": "sin-autonomia",
+                            "detalle": "falta «autonomia: <0|1|2>» junto a tipo-repo"})
+    elif autonomia and autonomia.group(1) not in NIVELES:
         violaciones.append({"repo": nombre, "regla": "autonomia-invalida",
                             "detalle": f"«autonomia: {autonomia.group(1)}»: el nivel es 0, 1 o 2"})
     elif autonomia and autonomia.group(1) != "0" and ((tipo and tipo.group(1) == "home")

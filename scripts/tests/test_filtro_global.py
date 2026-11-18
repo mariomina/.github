@@ -16,7 +16,7 @@ REGLA = "Ningún push, PR, merge ni cambio en main sin aprobación explícita de
 def home_md(punteros):
     lineas = "\n".join(f"- **{n}**: `~/Documentos/Mario/{n}`. Si falta: `git clone git@github.com:o/{n}.git`."
                        for n in punteros)
-    return f"# home\n\ntipo-repo: home\n\n## Reglas globales\n\n- {REGLA}\n\n## Otros repos\n\n{lineas}\n"
+    return f"# home\n\ntipo-repo: home\nautonomia: 0\n\n## Reglas globales\n\n- {REGLA}\n\n## Otros repos\n\n{lineas}\n"
 
 
 class FiltroGlobal(unittest.TestCase):
@@ -50,24 +50,24 @@ class FiltroGlobal(unittest.TestCase):
 
     def test_todo_en_orden(self):
         self.repo("mario-home", home_md(["a"]))
-        self.repo("a", "# a\n\ntipo-repo: producto\n\nComandos propios.\n")
+        self.repo("a", "# a\n\ntipo-repo: producto\nautonomia: 0\n\nComandos propios.\n")
         r = self.correr()
         self.assertTrue(r["valido"], r)
         self.assertEqual(r["reglas_globales"], 1)
 
     def test_regla_duplicada(self):
         self.repo("mario-home", home_md(["a"]))
-        self.repo("a", f"# a\n\ntipo-repo: producto\n\n- {REGLA}\n")
+        self.repo("a", f"# a\n\ntipo-repo: producto\nautonomia: 0\n\n- {REGLA}\n")
         self.assertEqual(self.reglas(self.correr()), [("o/a", "duplicado-de-global")])
 
     def test_duplicado_reformulado(self):
         self.repo("mario-home", home_md(["a"]))
-        self.repo("a", "# a\n\ntipo-repo: producto\n\n- Ningún push, PR, merge ni cambio en `main` sin aprobación explícita de Mario\n")
+        self.repo("a", "# a\n\ntipo-repo: producto\nautonomia: 0\n\n- Ningún push, PR, merge ni cambio en `main` sin aprobación explícita de Mario\n")
         self.assertEqual(self.reglas(self.correr()), [("o/a", "duplicado-de-global")])
 
     def test_excepcion_a_regla_global(self):
         self.repo("mario-home", home_md(["a"]))
-        self.repo("a", "# a\n\ntipo-repo: producto\n\n- Excepción: aquí no aplica la regla global de aprobación.\n")
+        self.repo("a", "# a\n\ntipo-repo: producto\nautonomia: 0\n\n- Excepción: aquí no aplica la regla global de aprobación.\n")
         self.assertEqual(self.reglas(self.correr()), [("o/a", "excepcion-a-global")])
 
     def test_sin_agents_md_y_sin_tipo(self):
@@ -77,12 +77,13 @@ class FiltroGlobal(unittest.TestCase):
         self.assertEqual(self.reglas(self.correr()), [("o/a", "sin-agents-md"), ("o/b", "sin-tipo-repo")])
 
     def test_autonomia(self):
-        self.repo("mario-home", home_md(["a", "b", "c", "d"]).replace("tipo-repo: home", "tipo-repo: home\nautonomia: 1"))
+        self.repo("mario-home", home_md(["a", "b", "c", "d"]).replace("autonomia: 0", "autonomia: 1"))
         self.repo("a", "# a\n\ntipo-repo: producto\nautonomia: 2\n")
         self.repo("b", "# b\n\ntipo-repo: producto\nautonomia: alta\n")
         self.repo("c", "# c\n\ntipo-repo: producto\n")
         self.repo("d", "# d\n\ntipo-repo: home\nautonomia: 0\n")
-        self.assertEqual(self.reglas(self.correr()), [("mario-home", "autonomia-fija-en-0"), ("o/b", "autonomia-invalida")])
+        self.assertEqual(self.reglas(self.correr()), [("mario-home", "autonomia-fija-en-0"), ("o/b", "autonomia-invalida"),
+                                                      ("o/c", "sin-autonomia")])
 
     def test_tipo_desconocido(self):
         self.repo("mario-home", home_md(["a"]))
@@ -94,7 +95,7 @@ class FiltroGlobal(unittest.TestCase):
         self.repo("mario-home", home_md([]) + "- **mario-hermes**: `~/.hermes`. Si falta: "
                                               "`git clone git@github.com:o/mario-hermes.git ~/.hermes`.\n")
         (self.casa / ".hermes").mkdir()
-        (self.casa / ".hermes" / "AGENTS.md").write_text("# h\n\ntipo-repo: agente\n", encoding="utf-8")
+        (self.casa / ".hermes" / "AGENTS.md").write_text("# h\n\ntipo-repo: agente\nautonomia: 0\n", encoding="utf-8")
         r = self.correr()
         self.assertTrue(r["valido"], r["violaciones"])
         self.assertEqual(r["repos"], [{"repo": "o/mario-hermes", "tipo": "agente"}])
@@ -102,19 +103,19 @@ class FiltroGlobal(unittest.TestCase):
     def test_cascada_por_home_hijo(self):
         self.repo("mario-home", home_md(["agencia"]))
         self.repo("agencia", home_md(["cliente-x"]).replace("# home", "# agencia"))
-        self.repo("cliente-x", f"# x\n\ntipo-repo: cliente\n\n- {REGLA}\n")
+        self.repo("cliente-x", f"# x\n\ntipo-repo: cliente\nautonomia: 0\n\n- {REGLA}\n")
         r = self.correr()
         self.assertEqual([x["repo"] for x in r["repos"]], ["o/agencia", "o/cliente-x"])
         self.assertIn(("o/cliente-x", "duplicado-de-global"), self.reglas(r))
 
     def test_puntero_con_placeholder_se_salta(self):
         self.repo("mario-home", home_md(["a"]) + "- **cliente**: `~/Documentos/Mario/cliente-<slug>`.\n")
-        self.repo("a", "# a\n\ntipo-repo: web\n")
+        self.repo("a", "# a\n\ntipo-repo: web\nautonomia: 0\n")
         self.assertTrue(self.correr()["valido"])
 
     def test_repo_sin_puntero_es_aviso(self):
         self.repo("mario-home", home_md([]))
-        self.repo("suelto", "# s\n\ntipo-repo: web\n")
+        self.repo("suelto", "# s\n\ntipo-repo: web\nautonomia: 0\n")
         r = self.correr()
         self.assertTrue(r["valido"])
         self.assertEqual([a["repo"] for a in r["avisos"]], ["suelto"])
@@ -123,8 +124,8 @@ class FiltroGlobal(unittest.TestCase):
         """mariomina/.github#24: los repos de una carpeta de grupo (mario-agencia/) cuentan para el aviso."""
         self.repo("mario-home", home_md([]) + "- **agencia-home**: `~/Documentos/Mario/mario-agencia/agencia-home`. "
                                               "Si falta: `git clone git@github.com:e/agencia-home.git`.\n")
-        self.repo("mario-agencia/agencia-home", "# h\n\ntipo-repo: home\n\n## Otros repos\n\n")
-        self.repo("mario-agencia/agencia-web", "# w\n\ntipo-repo: web\n")
+        self.repo("mario-agencia/agencia-home", "# h\n\ntipo-repo: home\nautonomia: 0\n\n## Otros repos\n\n")
+        self.repo("mario-agencia/agencia-web", "# w\n\ntipo-repo: web\nautonomia: 0\n")
         (self.proy / "mario-agencia" / "notas").mkdir()
         r = self.correr()
         self.assertTrue(r["valido"], r["violaciones"])
@@ -138,7 +139,7 @@ class FiltroGlobal(unittest.TestCase):
     def test_modo_repo(self):
         d = self.repo("a", "# a\n\nSin tipo.\n")
         self.assertEqual([v["regla"] for v in filtro.modo_repo(str(d))["violaciones"]], ["sin-tipo-repo"])
-        (d / "AGENTS.md").write_text("# a\n\ntipo-repo: vault\n", encoding="utf-8")
+        (d / "AGENTS.md").write_text("# a\n\ntipo-repo: vault\nautonomia: 0\n", encoding="utf-8")
         self.assertTrue(filtro.modo_repo(str(d))["valido"])
 
 
