@@ -1,11 +1,15 @@
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    directories: ["/", "/acciones/*"]
+    # Una PR al mes con todas las acciones: su CI gasta cuota (mariomina/mario-home#134) y espera veredicto y
+    # permiso como una PR de trabajo. Una versión nueva espera 7 días antes de proponerse: una versión
+    # comprometida suele detectarse y retirarse antes.
     schedule:
-      interval: weekly
-    # Una versión nueva espera 7 días antes de proponerse: una versión comprometida suele detectarse y
-    # retirarse antes. El barrido fusiona solo las de parche o menor (mariomina/mario-2-cerebro#280).
+      interval: monthly
+    groups:
+      acciones:
+        patterns: ["*"]
     cooldown:
       default-days: 7
     labels: ["area/ci"]
