@@ -1,0 +1,91 @@
+# Acción compuesta: los checks de PR de todos los repos en un solo job (mariomina/mario-home#134, P1).
+# GitHub redondea cada job a 1 min: un job con pasos cuesta 1 redondeo; 3 jobs reutilizables, 3.
+# Uso (el job hace antes `actions/checkout`; los pasos propios del repo van después con `if: ${{ !cancelled() }}`):
+#   - uses: mariomina/.github/acciones/pr@v1
+#     with:
+#       agents-md: "false"   # si el filtro global ya comprueba el AGENTS.md del repo (mario-home)
+# Cada paso corre aunque falle el anterior: un título mal escrito no oculta el resultado de los tests.
+name: pr
+description: Título convencional, estructura de AGENTS.md y CI de Python (uv) en un solo job.
+
+inputs:
+  token:
+    description: Token para leer la PR (título)
+    default: ${{ github.token }}
+  titulo:
+    description: Comprobar que el título de la PR sigue Conventional Commits
+    default: "true"
+  agents-md:
+    description: Comprobar el AGENTS.md con el filtro global (modo repo)
+    default: "true"
+  python:
+    description: Marcas de conflicto siempre; con pyproject.toml, además lint y tests con uv
+    default: "true"
+  python-version:
+    description: Versión de Python para uv
+    default: "3.12"
+
+runs:
+  using: composite
+  steps:
+    - name: Título convencional
+      if: ${{ !cancelled() && inputs.titulo == 'true' && startsWith(github.event_name, 'pull_request') }}
+      uses: amannn/action-semantic-pull-request@2252a14e810aa9b85c2d560bd7070c802206ecf6 # v6.1.2
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      with:
+        types: |
+          feat
+          fix
+          docs
+          chore
+          refactor
+          test
+          ci
+          perf
+          build
+          revert
+          experiment
+        requireScope: false
+    - name: AGENTS.md (filtro global, modo repo)
+      if: ${{ !cancelled() && inputs.agents-md == 'true' }}
+      shell: bash
+      run: python3 -I "$GITHUB_ACTION_PATH/../../scripts/filtro_global.py" --repo .
+    - name: Sin marcas de conflicto
+      if: ${{ !cancelled() && inputs.python == 'true' }}
+      shell: bash
+      run: |
+        rc=0
+        git grep -nE '^(<<<<<<<|>>>>>>>) ' -- . ':!*.lock' || rc=$?
+        if [ "$rc" -eq 0 ]; then echo "::error::Quedan marcas de conflicto"; exit 1; fi
+        if [ "$rc" -gt 1 ]; then echo "::error::git grep falló ($rc)"; exit "$rc"; fi
+    - name: Detectar Python
+      id: py
+      if: ${{ !cancelled() && inputs.python == 'true' }}
+      shell: bash
+      run: |
+        if [ -f pyproject.toml ]; then echo "hay=true" >> "$GITHUB_OUTPUT"; else echo "hay=false" >> "$GITHUB_OUTPUT"; fi
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      if: ${{ !cancelled() && steps.py.outputs.hay == 'true' }}
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Instalar
+      id: instalar
+      if: ${{ !cancelled() && steps.py.outputs.hay == 'true' }}
+      shell: bash
+      run: |
+        if [ -f uv.lock ]; then uv sync --locked --all-extras --dev; else uv sync --all-extras --dev; fi
+    - name: Lint
+      if: ${{ !cancelled() && steps.instalar.outcome == 'success' }}
+      shell: bash
+      # Usa la versión de ruff del proyecto si la declara; si no, la última
+      run: uv run --with ruff ruff check .
+    - name: Tests
+      if: ${{ !cancelled() && steps.instalar.outcome == 'success' }}
+      shell: bash
+      run: |
+        if [ ! -d tests ]; then echo "Sin carpeta tests/"; exit 0; fi
+        rc=0; uv run --with pytest pytest -q || rc=$?
+        # 5 = no se recogió ningún test (repo recién creado)
+        if [ "$rc" -eq 5 ]; then echo "Sin tests todavía"; exit 0; fi
+        exit "$rc"
