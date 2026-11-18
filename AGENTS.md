@@ -3,7 +3,7 @@
 tipo-repo: producto
 autonomia: 0
 
-Valores por defecto de GitHub (formularios, plantilla de PR, CONTRIBUTING, SECURITY) y workflows reutilizables que llaman todos los repos de Mario. Las reglas de trabajo son las de `mario-home/AGENTS.md`; aquí solo lo propio de este repo.
+Valores por defecto de GitHub (formularios, CONTRIBUTING, SECURITY) y workflows reutilizables que llaman todos los repos de Mario. Las reglas de trabajo son las de `mario-home/AGENTS.md`; aquí solo lo propio de este repo. Sin plantilla de PR: el cuerpo lo define pstack (playbook «Opening a PR»).
 
 ## Reglas propias
 
