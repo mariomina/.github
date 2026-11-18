@@ -1,6 +1,7 @@
 # .github de mariomina
 
 tipo-repo: producto
+autonomia: 0
 
 Valores por defecto de GitHub (formularios, plantilla de PR, CONTRIBUTING, SECURITY) y workflows reutilizables que llaman todos los repos de Mario. Las reglas de trabajo son las de `mario-home/AGENTS.md`; aquí solo lo propio de este repo.
 
