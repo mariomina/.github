@@ -8,10 +8,10 @@ permissions:
   contents: read
   pull-requests: read
 
-# Un push nuevo cancela el CI del head superado; un cambio de título (`edited`) no cancela el que corre.
+# Solo un push nuevo (synchronize: cambia el head) cancela el CI en curso; edited, opened y reopened esperan.
 concurrency:
   group: pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: ${{ github.event.action != 'edited' }}
+  cancel-in-progress: ${{ github.event.action == 'synchronize' }}
 
 jobs:
   pr:
