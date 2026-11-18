@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/mariomina/.github/compare/v1.10.0...v1.10.1) (2026-11-18)
+
+
+### Documentación
+
+* **agents:** declarar autonomia: 0 ([#45](https://github.com/mariomina/.github/issues/45)) ([e91e895](https://github.com/mariomina/.github/commit/e91e8959efc1dd87e992c59f1d9cb28c47b247a7))
+
 ## [1.10.0](https://github.com/mariomina/.github/compare/v1.9.0...v1.10.0) (2026-11-16)
 
 
