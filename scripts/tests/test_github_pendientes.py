@@ -34,6 +34,12 @@ def dependabot(numero, desde, hasta, ci="SUCCESS"):
               autor="dependabot", ci=ci)
 
 
+def version(numero, ci="SUCCESS"):
+    """PR de versión de la App: la única que el barrido fusiona solo (Dependabot espera veredicto, #134)."""
+    return pr(numero, "chore(main): release 1.0.0", f"release-please--branches--r{numero}",
+              "mariomina-automatizacion", ci=ci)
+
+
 def repo(prs=(), principal="SUCCESS", ramas=(), issues=(), merge=True, historia=None):
     historia = [{"statusCheckRollup": {"state": e} if e else None} for e in (historia or [principal])]
     return {"mergeCommitAllowed": merge, "squashMergeAllowed": True, "rebaseMergeAllowed": True,
@@ -83,12 +89,14 @@ class Clasificacion(unittest.TestCase):
         estado = gp.analizar(nodos, [], AHORA)
         self.assertEqual(acciones(estado), {
             ("o/a", 1): ("version", "esperar"), ("o/a", 2): ("version", "fusionar"),
-            ("o/a", 3): ("dependabot-menor", "fusionar"), ("o/a", 4): ("dependabot-menor", "esperar"),
+            ("o/a", 3): ("dependabot-menor", "decision"), ("o/a", 4): ("dependabot-menor", "esperar"),
             ("o/a", 5): ("dependabot-menor", "decision"), ("o/a", 6): ("dependabot-menor", "decision"),
             ("o/a", 7): ("dependabot-mayor", "decision"), ("o/a", 8): ("dependabot-mayor", "decision"),
             ("o/a", 9): ("trabajo", "decision"), ("o/a", 10): ("trabajo", "borrador"),
             ("o/a", 11): ("version", "decision"), ("o/a", 12): ("version", "decision"),
             ("o/a", 13): ("version", "esperar"), ("o/a", 14): ("version", "fusionar")})
+        self.assertEqual(next(p["motivo"] for p in estado["prs"] if p["numero"] == 3),
+                         "Dependabot: falta veredicto y permiso")
         motivos = {p["numero"]: p["motivo"] for p in estado["prs"] if p["clase"] == "version"}
         self.assertEqual(motivos, {1: "CI en curso", 2: "CI en verde", 11: "PR de versión sin CI",
                                    12: "PR de versión con CI rojo", 13: "CI en curso", 14: "CI en verde"})
@@ -185,7 +193,7 @@ class Repos(unittest.TestCase):
 
 class Fusion(unittest.TestCase):
     def test_fusiona_con_sha_y_metodo_y_sigue_tras_un_error(self):
-        nodos = {"o/a": repo([dependabot(3, "5.1", "5.2"), dependabot(7, "5", "7")], merge=False),
+        nodos = {"o/a": repo([version(3), dependabot(7, "5", "7")], merge=False),
                  "o/b": repo([pr(2, "chore: release", "release-please--branches--main", "github-actions",
                                  ci="SUCCESS", edad=timedelta(hours=1))])}
         estado = gp.analizar(nodos, [], AHORA)
@@ -206,8 +214,8 @@ class Fusion(unittest.TestCase):
         self.assertEqual(errores, [{"repo": "o/a", "detalle": "#3: HTTP 405 not mergeable"}])
 
     def test_fusiona_con_el_token_del_dueno(self):
-        estado = gp.analizar({"Escala-Agencia/w": repo([dependabot(3, "5.1", "5.2")]),
-                              "o/a": repo([dependabot(4, "5.1", "5.2")])}, [], AHORA)
+        estado = gp.analizar({"Escala-Agencia/w": repo([version(3)]),
+                              "o/a": repo([version(4)])}, [], AHORA)
         tokens = []
         with mock.patch.object(gp, "http", lambda m, url, token, c=None: tokens.append((url.split("/")[5], token))), \
                 mock.patch.dict("os.environ", {"GH_TOKEN_ESCALA_AGENCIA": "te"}), mock.patch("builtins.print"):
@@ -215,7 +223,7 @@ class Fusion(unittest.TestCase):
         self.assertEqual(tokens, [("w", "te"), ("a", "t")])
 
     def test_main_fusionar_registra_las_fusionadas_y_sale_con_1_si_alguna_falla(self):
-        nodos = {"o/a": repo([dependabot(3, "5.1", "5.2")]),
+        nodos = {"o/a": repo([version(3)]),
                  "o/b": repo([pr(2, "chore: release", "release-please--branches--main", "github-actions",
                                  ci="SUCCESS")])}
         estado = gp.analizar(nodos, [], AHORA)
@@ -627,7 +635,7 @@ class LogPublico(unittest.TestCase):
         self.assertIn("1 fusionadas · 1 esperan decisión", texto)
 
     def test_fusionar_discreto_no_nombra_la_pr_ni_el_motivo_del_error(self):
-        estado = gp.analizar({"o/secreto": repo([dependabot(3, "5.1", "5.2"), dependabot(4, "5.1", "5.3")])},
+        estado = gp.analizar({"o/secreto": repo([version(3), version(4)])},
                              [], AHORA)
         respuestas = [urllib.error.HTTPError("u", 409, "x", {}, io.BytesIO(b'{"message": "rama cliente-acme"}')),
                       urllib.error.URLError("conexión a o/secreto")]
