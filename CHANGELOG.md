@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/mariomina/.github/compare/v1.11.0...v1.12.0) (2026-11-18)
+
+
+### Novedades
+
+* **acciones:** checks de PR en un solo job y Dependabot con veredicto ([#51](https://github.com/mariomina/.github/issues/51)) ([6cbe21d](https://github.com/mariomina/.github/commit/6cbe21dbc3b723f42a8fb606485eaf40ef957d71))
+
 ## [1.11.0](https://github.com/mariomina/.github/compare/v1.10.1...v1.11.0) (2026-11-18)
 
 
