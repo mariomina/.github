@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/mariomina/.github/compare/v1.12.0...v1.12.1) (2026-11-18)
+
+
+### Correcciones
+
+* **scripts:** el barrido lee la ejecución más reciente de cada check ([#53](https://github.com/mariomina/.github/issues/53)) ([e61350c](https://github.com/mariomina/.github/commit/e61350cd29e7e4872b0fc5283247f04bf82a916c))
+
 ## [1.12.0](https://github.com/mariomina/.github/compare/v1.11.0...v1.12.0) (2026-11-18)
 
 
