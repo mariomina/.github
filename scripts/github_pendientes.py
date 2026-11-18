@@ -5,8 +5,10 @@ Decisiones de Mario (mariomina/mario-2-cerebro#280):
     mariomina/.github#28). La crea y la fusiona el job reutilizable con el token de la GitHub App
     mariomina-automatizacion (el CI corre en la PR y el merge dispara la versión); si su CI acaba después,
     la fusiona `--fusionar`. CI rojo o sin CI tras 10 min: espera la decisión de Mario.
-  - Dependabot de parche o menor: se fusiona sola con CI en verde (statusCheckRollup = SUCCESS).
-  - Dependabot mayor (o título sin semver, o versión 0.x) y PR de trabajo: esperan la decisión de Mario.
+  - Dependabot: espera el veredicto de un verificador y el permiso de Mario, como una PR de trabajo (pstack:
+    el CI en verde solo no autoriza una fusión; decisión de Mario en mariomina/mario-home#134). La tabla dice
+    si es de parche, menor o mayor (título sin semver o versión 0.x: mayor).
+  - PR de trabajo: espera la decisión de Mario.
   - Avisos (nunca se borra ni se cierra nada): workflow desactivado por 60 días sin actividad (no vuelve
     con ningún trigger: el aviso da el `gh workflow enable` que lo recupera), CI rojo en la rama principal,
     ramas sin PR y PR de más de 7 días, issues abiertos sin proyecto.
@@ -244,9 +246,10 @@ def clasificar_pr(repo, pr, ahora):
         if s == "mayor":
             e.update(accion="decision", motivo="Dependabot mayor")
         elif ci == "SUCCESS":
-            e.update(accion="fusionar", motivo="CI en verde")
+            e.update(accion="decision", motivo="Dependabot: falta veredicto y permiso")
         elif ci in ("PENDING", "EXPECTED"):
-            e.update(accion="esperar", motivo="CI en curso")
+            # «esperar» cuenta como «se fusiona sola» en el informe: Dependabot nunca lo hace (#134)
+            e.update(accion="decision", motivo="Dependabot: CI en curso; falta veredicto y permiso")
         else:
             e.update(accion="decision", motivo="Dependabot con CI rojo" if ci else "Dependabot sin CI")
     elif pr.get("isDraft"):

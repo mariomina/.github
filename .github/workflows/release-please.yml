@@ -38,7 +38,7 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-slim
-    timeout-minutes: 20
+    timeout-minutes: 15  # límite de ubuntu-slim
     env:
       HAY_APP: ${{ secrets.APP_PRIVATE_KEY != '' }}
     outputs:
