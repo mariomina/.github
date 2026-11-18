@@ -235,35 +235,36 @@ def _es_dependabot(pr):
     return _autor(pr) == "dependabot" and pr.get("isCrossRepository") is False
 
 
-def _cuando(contexto):
-    """Fecha de un check (ISO, comparable como texto). Sin fecha cuenta como el más reciente: lado seguro."""
-    return contexto.get("startedAt") or contexto.get("createdAt") or "9999"
-
-
 def estado_ci(rollup):
     """SUCCESS · PENDING · FAILURE o None (sin checks, o ninguno en verde) del `statusCheckRollup` de un commit,
     con la ejecución más reciente de cada check, como `gh pr checks`: un mismo nombre (y workflow y evento)
     puede tener varias ejecuciones en el mismo head y el `state` de GitHub las cuenta todas (mariomina/.github#51:
-    1 `pr` FAILURE antigua + 4 `pr` SUCCESS daba FAILURE). Sin la lista completa de checks: el `state` de GitHub."""
+    1 `pr` FAILURE antigua + 4 `pr` SUCCESS daba FAILURE). Lado seguro, para cubrir lo que `gh` pueda elegir:
+    un check sin fecha cuenta siempre, y con un empate en la fecha más reciente cuentan todos los empatados.
+    Sin la lista completa de checks: el `state` de GitHub."""
     if not rollup:
         return None
     contextos = rollup.get("contexts") or {}
     nodos = contextos.get("nodes")
     if nodos is None or len(nodos) < (contextos.get("totalCount") or 0):
         return rollup.get("state")
-    vistos, estados = set(), set()
-    for c in sorted(nodos, key=_cuando, reverse=True):
+    grupos = {}  # clave → [(fecha o None, estado)]
+    for c in nodos:
         if c.get("__typename") == "StatusContext" or "context" in c:
             clave, estado = ("status", c.get("context")), c.get("state")
         else:
             corrida = ((c.get("checkSuite") or {}).get("workflowRun")) or {}
             clave = ("check", c.get("name"), ((corrida.get("workflow") or {}).get("name")), corrida.get("event"))
             estado = c.get("conclusion") if c.get("status") == "COMPLETED" else c.get("status")
-        if clave in vistos:
-            continue
-        vistos.add(clave)
-        estados.add("rojo" if estado in ROJO else "verde" if estado in VERDE else
-                    "saltado" if estado in SALTADO else "en curso")
+        grupos.setdefault(clave, []).append((c.get("startedAt") or c.get("createdAt"), estado))
+    estados = set()
+    for ejecuciones in grupos.values():
+        ultima = max((f for f, _ in ejecuciones if f), default=None)  # ISO en UTC: se compara como texto
+        for fecha, estado in ejecuciones:
+            if fecha and fecha != ultima:
+                continue
+            estados.add("rojo" if estado in ROJO else "verde" if estado in VERDE else
+                        "saltado" if estado in SALTADO else "en curso")
     if "rojo" in estados:
         return "FAILURE"
     if "en curso" in estados:

@@ -634,11 +634,24 @@ class EstadoCi(unittest.TestCase):
                        corrida("SUCCESS", "2026-11-18T18:02:00Z"))
             self.assertEqual(gp.estado_ci(r), "FAILURE", otro)
 
-    def test_en_curso_y_sin_fecha_cuenta_como_la_mas_reciente(self):
+    def test_en_curso_mas_reciente(self):
         self.assertEqual(gp.estado_ci(rollup("PENDING", corrida("SUCCESS", "2026-11-18T18:01:00Z"),
                                              corrida(None, "2026-11-18T18:02:00Z", status="IN_PROGRESS"))), "PENDING")
-        self.assertEqual(gp.estado_ci(rollup("FAILURE", corrida("SUCCESS", "2026-11-18T18:01:00Z"),
-                                             corrida("FAILURE", None))), "FAILURE")
+
+    def test_sin_fecha_cuenta_siempre(self):
+        # gh pone un check sin fecha como el más antiguo: un verde sin fecha nunca tapa un rojo con fecha
+        for orden in ((("SUCCESS", "2026-11-18T18:01:00Z"), ("FAILURE", None)),
+                      (("FAILURE", "2026-11-18T18:01:00Z"), ("SUCCESS", None))):
+            self.assertEqual(gp.estado_ci(rollup("FAILURE", *(corrida(*c) for c in orden))), "FAILURE", orden)
+        self.assertEqual(gp.estado_ci(rollup("SUCCESS", corrida("SUCCESS", None))), "SUCCESS")
+
+    def test_empate_en_la_fecha_mas_reciente_cuentan_todos(self):
+        t = "2026-11-18T18:01:00Z"  # p. ej. `opened` y `labeled` en el mismo segundo; gh no ordena estable
+        for orden in ((("SUCCESS", t), ("FAILURE", t)), (("FAILURE", t), ("SUCCESS", t))):
+            self.assertEqual(gp.estado_ci(rollup("FAILURE", corrida("FAILURE", "2026-11-18T18:00:00Z"),
+                                                 *(corrida(*c) for c in orden))), "FAILURE", orden)
+        self.assertEqual(gp.estado_ci(rollup("FAILURE", corrida("FAILURE", "2026-11-18T18:00:00Z"),
+                                             corrida("SUCCESS", t), corrida("SUCCESS", t))), "SUCCESS")
 
     def test_status_context_y_saltados(self):
         estado = {"__typename": "StatusContext", "context": "ci/x", "state": "SUCCESS",
