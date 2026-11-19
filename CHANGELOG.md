@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/mariomina/.github/compare/v1.13.0...v1.13.1) (2026-11-19)
+
+
+### Correcciones
+
+* **filtro_global:** en el home, solo cuentan las excepciones de «Reglas globales» ([#57](https://github.com/mariomina/.github/issues/57)) ([b6b871a](https://github.com/mariomina/.github/commit/b6b871a7bc27e6891de43395fd680becd58362b6)), closes [#56](https://github.com/mariomina/.github/issues/56)
+
 ## [1.13.0](https://github.com/mariomina/.github/compare/v1.12.1...v1.13.0) (2026-11-19)
 
 
