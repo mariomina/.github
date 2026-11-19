@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/mariomina/.github/compare/v1.12.1...v1.13.0) (2026-11-19)
+
+
+### Novedades
+
+* **scripts:** filtro_global.py --nombres detecta repos y checks que no existen ([#58](https://github.com/mariomina/.github/issues/58)) ([fcabf90](https://github.com/mariomina/.github/commit/fcabf902c737419b219785b7676db29617c9d1a4))
+
 ## [1.12.1](https://github.com/mariomina/.github/compare/v1.12.0...v1.12.1) (2026-11-18)
 
 
