@@ -152,11 +152,77 @@ class FiltroGlobal(unittest.TestCase):
             self.assertEqual(filtro.token("Escala-Agencia/agencia-web"), "te")
             self.assertEqual(filtro.token("mariomina/mario-home"), "t")
 
+    def test_nombres_de_punta_a_punta(self):
+        """mariomina/.github#55: --nombres lee los documentos del árbol git de cada repo apuntado."""
+        import subprocess
+        self.repo("mario-home", home_md(["a"]))
+        a = self.repo("a", "# a\n\ntipo-repo: producto\nautonomia: 0\n\nReglas: `home-mario/AGENTS.md`.\n")
+        (a / ".git").rmdir()
+        subprocess.run(["git", "init", "-q", str(a)], check=True)
+        subprocess.run(["git", "-C", str(a), "add", "AGENTS.md"], check=True)
+        r = filtro.modo_completo(str(self.proy / "mario-home"), remoto=False, nombres=True)
+        self.assertEqual([(v["repo"], v["regla"], v["detalle"]) for v in r["violaciones"]],
+                         [("o/a", "nombre-repo", "home-mario")])
+        self.assertTrue(filtro.modo_completo(str(self.proy / "mario-home"), remoto=False)["valido"])
+
     def test_modo_repo(self):
         d = self.repo("a", "# a\n\nSin tipo.\n")
         self.assertEqual([v["regla"] for v in filtro.modo_repo(str(d))["violaciones"]], ["sin-tipo-repo"])
         (d / "AGENTS.md").write_text("# a\n\ntipo-repo: vault\nautonomia: 0\n", encoding="utf-8")
         self.assertTrue(filtro.modo_repo(str(d))["valido"])
+
+
+PR_YML = "name: pr\non:\n  pull_request:\njobs:\n  pr:\n    runs-on: x\n  ci:\n    uses: o/.github/.github/workflows/ci-python.yml@v1\n"
+CI_PYTHON = "name: ci-python\non:\n  workflow_call:\njobs:\n  ci:\n    name: ci\n    runs-on: x\n"
+
+
+class Nombres(unittest.TestCase):
+    """--nombres con los desfases reales de mariomina/mario-home#134 y #138 (mariomina/.github#55)."""
+
+    def violaciones(self, documentos, workflows=None):
+        repos = {"o/.github": {"textos": {".github/workflows/ci-python.yml": CI_PYTHON}},
+                 "o/mario-home": {"textos": {".github/workflows/pr.yml": PR_YML, **(workflows or {})}},
+                 "o/a": {"textos": documentos}}
+        violaciones = []
+        filtro.revisar_nombres(repos, {"mario-github", "mario-agencia"}, violaciones)
+        return [(v["archivo"], v["linea"], v["regla"], v["detalle"]) for v in violaciones]
+
+    def test_desfases_reales_fallan(self):
+        documentos = {
+            "AGENTS.md": "# a\n\nReglas globales: `home-mario/AGENTS.md` y `home-agencia/AGENTS.md`.\n",
+            "CONTRIBUTING.md": "4. **Una PR por rama**, con título convencional (lo comprueba `pr-titulo`).\n",
+            "docs/branch_protection.md": "Checks obligatorios: `pr-titulo / pr-titulo` y `ci / ci`.\n",
+            "README.md": "Clon: `git clone git@github.com:o/home-mario.git`.\n"}
+        self.assertEqual(self.violaciones(documentos, {".github/workflows/x.yml": "on:\n  push:\njobs:\n  ci:\n"}), [
+            ("AGENTS.md", 3, "nombre-repo", "home-mario"),
+            ("AGENTS.md", 3, "nombre-repo", "home-agencia"),
+            ("CONTRIBUTING.md", 1, "nombre-check", "pr-titulo"),
+            ("README.md", 1, "nombre-repo", "o/home-mario"),
+            ("docs/branch_protection.md", 1, "nombre-check", "pr-titulo / pr-titulo")])
+
+    def test_documentos_corregidos_pasan(self):
+        documentos = {
+            "AGENTS.md": "# a\n\nReglas globales: `mario-home/AGENTS.md`; carpeta `mario-agencia/`, `mario-github`.\n",
+            "CONTRIBUTING.md": "4. **Una PR por rama**, con título convencional (lo comprueba `pr`).\n",
+            "docs/branch_protection.md": "Checks: `pr / pr`, `ci / ci` y el check `ci-python`.\n",
+            "README.md": "Clon: `git clone git@github.com:o/mario-home.git`; `o/.github`; ver `o/a#12`.\n"}
+        self.assertEqual(self.violaciones(documentos), [])
+
+    def test_lo_que_no_se_mira(self):
+        documentos = {
+            "AGENTS.md": "Marcadores: `mario-<arnés>/ajustes/`, `o/mario-<producto>`, `agencia-cliente-<slug>`.\n"
+                         "Prosa: home-mario y los widgets home-screen; ruta `clients/mario-mina/x.md`.\n",
+            "docs/investigaciones/vieja.md": "`home-mario` y el check `pr-titulo`.\n",
+            "CHANGELOG.md": "`home-mario`\n",
+            "src/notas.md": "`home-mario`\n"}
+        self.assertEqual(self.violaciones(documentos), [])
+
+    def test_check_sin_llamador_de_pull_request(self):
+        """`ci / ci` existe solo mientras un workflow con pull_request llama al reutilizable."""
+        sin_llamador = PR_YML.replace("  ci:\n    uses: o/.github/.github/workflows/ci-python.yml@v1\n", "")
+        self.assertEqual(self.violaciones({"README.md": "Check `ci / ci`.\n"},
+                                          {".github/workflows/pr.yml": sin_llamador}),
+                         [("README.md", 1, "nombre-check", "ci / ci")])
 
 
 if __name__ == "__main__":
