@@ -11,10 +11,14 @@ Modos:
                           Un token de GitHub App vale para una sola cuenta: GH_TOKEN_<DUEÑO> (p. ej.
                           GH_TOKEN_ESCALA_AGENCIA) manda sobre GH_TOKEN en los repos de ese dueño.
   --repo RUTA             Solo la estructura de un repo: AGENTS.md, tipo-repo y excepciones (PR de cada repo).
+  --nombres               Con el modo completo: además, los documentos base de cada repo apuntado (Markdown de la
+                          raíz y de docs/, sin docs/investigaciones/ ni CHANGELOG.md) no nombran un repo ni un
+                          check que no existe (mariomina/.github#55). El inventario sale de los punteros y de los
+                          workflows con pull_request de cada repo: nada que mantener a mano.
 
 Violaciones (salida 1): repo apuntado sin AGENTS.md o sin tipo-repo válido; `autonomia: N` sin declarar, fuera de 0–2,
 o distinto de 0 en un home repo o en .github (mariomina/mario-home#19); regla global repetida
-en un repo; repo que declara una excepción a una regla global.
+en un repo; repo que declara una excepción a una regla global; con --nombres, nombre-repo y nombre-check.
 Avisos (salida 0): repo con git en ~/Documentos/Mario (o en una carpeta de grupo sin git, como
 mario-agencia/) que no está en ningún puntero.
 Salida JSON en stdout.
@@ -25,7 +29,9 @@ import difflib
 import json
 import os
 import re
+import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -42,6 +48,12 @@ RE_CLONE = re.compile(r"git@github\.com:([\w.-]+/[\w.-]+?)\.git")
 RE_EXCEPCION = re.compile(
     r"(excepci[oó]n|no aplica|salvo|se ignora|ignora|no rige)[^.\n]{0,80}(regla(s)? global(es)?|mario-home)",
     re.I)
+# --nombres (mariomina/.github#55)
+RE_CODIGO = re.compile(r"`([^`\n]+)`")
+RE_PALABRA_REPO = re.compile(r"(?<![\w.<~/-])((?:mario|agencia|home)-[a-z0-9][\w-]*[a-z0-9])(?![\w<-])")
+RE_PAR_CHECK = re.compile(r"^([\w.-]+) / ([\w.-]+)$")
+RE_UN_CHECK = re.compile(r"^[a-z][\w-]*$")
+RE_ANTES_CHECK = re.compile(r"\b(?:checks?|comprueba|jobs?)\s*$", re.I)
 
 
 def seccion(texto, titulo):
@@ -84,19 +96,33 @@ def token(nombre):
     return os.environ.get(f"GH_TOKEN_{dueno}") or os.environ["GH_TOKEN"]
 
 
-def leer_remoto(nombre):
-    if not nombre:
-        return None
-    req = urllib.request.Request(f"https://api.github.com/repos/{nombre}/contents/AGENTS.md",
+def api(nombre, ruta):
+    req = urllib.request.Request(f"https://api.github.com/repos/{nombre}/{ruta}",
                                  headers={"Authorization": f"bearer {token(nombre)}",
                                           "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def leer_remoto(nombre, archivo="AGENTS.md"):
+    if not nombre:
+        return None
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return base64.b64decode(json.load(r)["content"]).decode("utf-8")
+        datos = api(nombre, f"contents/{urllib.parse.quote(archivo)}")
+        return base64.b64decode(datos["content"]).decode("utf-8")
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
         raise
+
+
+def archivos_local(ruta):
+    r = subprocess.run(["git", "-C", str(ruta), "ls-files"], capture_output=True, text=True)
+    return set(r.stdout.splitlines()) if r.returncode == 0 else set()
+
+
+def archivos_remoto(nombre):
+    return {e["path"] for e in api(nombre, "git/trees/HEAD?recursive=1")["tree"] if e["type"] == "blob"}
 
 
 def revisar_estructura(nombre, texto, violaciones):
@@ -135,6 +161,65 @@ def revisar_duplicados(nombre, texto, globales, violaciones):
                 break
 
 
+def es_documento(ruta):
+    """Documento base: Markdown de la raíz o de docs/, sin investigaciones (fechadas) ni el changelog generado."""
+    if not ruta.endswith(".md") or ruta == "CHANGELOG.md":
+        return False
+    return "/" not in ruta or (ruta.startswith("docs/") and not ruta.startswith("docs/investigaciones/"))
+
+
+def nombres_de_jobs(texto):
+    """Nombre del workflow, id y `name` de cada job: lo que GitHub muestra como check (`workflow / job`)."""
+    cabeza, _, jobs = texto.partition("\njobs:")
+    return (set(re.findall(r"^name:\s*['\"]?([^'\"\n#]+?)['\"]?\s*$", cabeza, re.M))
+            | set(re.findall(r"^  ([\w-]+):\s*$", jobs, re.M))
+            | set(re.findall(r"^    name:\s*['\"]?([^'\"\n#]+?)['\"]?\s*$", jobs, re.M)))
+
+
+def inventario_checks(repos):
+    """Checks de PR de todos los repos: workflows con pull_request y los jobs de los reutilizables que llaman."""
+    workflows = {f"{nombre}/{ruta}": texto for nombre, r in repos.items()
+                 for ruta, texto in r["textos"].items() if ruta.startswith(".github/workflows/")}
+    checks = set()
+    for texto in workflows.values():
+        if "pull_request" not in texto.partition("\njobs:")[0]:
+            continue
+        checks |= nombres_de_jobs(texto)
+        for uso in re.findall(r"uses:\s*([\w.-]+/[\w.-]+/\.github/workflows/[\w.-]+)@", texto):
+            checks |= nombres_de_jobs(workflows.get(uso, ""))
+    return checks
+
+
+def revisar_nombres(repos, otros_nombres, violaciones):
+    """Nombres de repo y de check que no existen, en el código (`…`) de los documentos base (mariomina/.github#55).
+
+    repos: {nombre: {"textos": {ruta: texto}}}, con los documentos y los workflows de cada repo apuntado.
+    otros_nombres: nombres de los punteros sin leer y de las carpetas locales y de grupo (mario-github, mario-agencia).
+    Las rutas de archivo no se comprueban: medido el 18-11 sobre los repos apuntados, 120 avisos y ningún nombre
+    desfasado que no vieran ya las 2 reglas (rutas de otros repos y del home, etiquetas, prefijos de rama).
+    """
+    cortos = {n.split("/")[-1] for n in repos} | set(otros_nombres)
+    duenos = "|".join(sorted({re.escape(n.split("/")[0]) for n in repos if "/" in n})) or "(?!)"
+    re_dueno = re.compile(rf"\b({duenos})"
+                          r"/([\w.-]+?)(?:\.git)?(?![\w.<-])")
+    checks = inventario_checks(repos)
+    for nombre, r in repos.items():
+        for ruta, texto in sorted(r["textos"].items()):
+            if not es_documento(ruta):
+                continue
+            for n, linea in enumerate(texto.splitlines(), 1):
+                for m in RE_CODIGO.finditer(linea):
+                    valor, malos = m.group(1).strip(), []
+                    malos += [("nombre-repo", c) for c in RE_PALABRA_REPO.findall(valor) if c not in cortos]
+                    malos += [("nombre-repo", f"{d}/{c}") for d, c in re_dueno.findall(valor) if c not in cortos]
+                    par = RE_PAR_CHECK.match(valor)
+                    if par or (RE_UN_CHECK.match(valor) and RE_ANTES_CHECK.search(linea[:m.start()])):
+                        if not set(par.groups() if par else [valor]) <= checks:
+                            malos.append(("nombre-check", valor))
+                    violaciones.extend({"repo": nombre, "regla": regla, "archivo": ruta, "linea": n, "detalle": d}
+                                       for regla, d in malos)
+
+
 def repos_locales():
     """Repos con git en PROYECTOS y en sus carpetas de grupo (un nivel, carpetas sin git: mario-agencia/)."""
     for d in sorted(PROYECTOS.iterdir()):
@@ -147,13 +232,29 @@ def repos_locales():
                         if h.is_dir() and h.name not in IGNORAR_DIRS and (h / ".git").exists())
 
 
-def modo_completo(home, remoto):
+def cargar(ruta, nombre, remoto):
+    """Documentos base y workflows de un repo, para --nombres."""
+    if remoto:
+        archivos, leer = archivos_remoto(nombre), lambda f: leer_remoto(nombre, f)
+    else:
+        archivos = archivos_local(ruta)
+        def leer(f):
+            p = Path(ruta) / f
+            return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else None
+    textos = {f: leer(f) for f in sorted(archivos)
+              if es_documento(f) or (f.startswith(".github/workflows/") and f.endswith((".yml", ".yaml")))}
+    return {"textos": {f: t for f, t in textos.items() if t is not None}}
+
+
+def modo_completo(home, remoto, nombres=False):
     violaciones, avisos, repos = [], [], []
     texto_home = leer_local(home)
     if texto_home is None:
         sys.exit(json.dumps({"valido": False, "error": f"no existe {home}/AGENTS.md"}))
     globales = reglas_globales(texto_home)
     revisar_estructura("mario-home", texto_home, violaciones)
+    datos = {"mario-home": cargar(home, None, False)} if nombres else {}
+    otros = set()  # nombres que existen: el de cada puntero, aunque falte su copia, y las carpetas locales y de grupo
     vistos, pendientes = {str(Path(home).resolve())}, list(punteros(texto_home))
     while pendientes:
         ruta, nombre = pendientes.pop(0)
@@ -165,11 +266,17 @@ def modo_completo(home, remoto):
         etiqueta = nombre or Path(ruta).name
         tipo = revisar_estructura(etiqueta, texto, violaciones)
         repos.append({"repo": etiqueta, "tipo": tipo})
+        otros |= {etiqueta.split("/")[-1], Path(ruta).name}
+        otros |= {p.name for p in Path(ruta).parents if PROYECTOS in p.parents}
         if texto is None:
             continue
         revisar_duplicados(etiqueta, texto, globales, violaciones)
+        if nombres and (nombre or not remoto):
+            datos[etiqueta] = cargar(ruta, nombre, remoto)
         if tipo == "home":
             pendientes.extend(punteros(texto))
+    if nombres:
+        revisar_nombres(datos, otros, violaciones)
     if not remoto and PROYECTOS.is_dir():
         for d in repos_locales():
             if str(d.resolve()) not in vistos:
@@ -190,8 +297,9 @@ def main():
     p.add_argument("--home", default=str(PROYECTOS / "mario-home"))
     p.add_argument("--remoto", action="store_true")
     p.add_argument("--repo")
+    p.add_argument("--nombres", action="store_true")
     a = p.parse_args()
-    r = modo_repo(a.repo) if a.repo else modo_completo(a.home, a.remoto)
+    r = modo_repo(a.repo) if a.repo else modo_completo(a.home, a.remoto, a.nombres)
     print(json.dumps(r, ensure_ascii=False, indent=2))
     sys.exit(0 if r["valido"] else 1)
 
