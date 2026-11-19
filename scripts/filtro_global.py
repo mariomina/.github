@@ -12,14 +12,13 @@ Modos:
                           GH_TOKEN_ESCALA_AGENCIA) manda sobre GH_TOKEN en los repos de ese dueño.
   --repo RUTA             Solo la estructura de un repo: AGENTS.md, tipo-repo y excepciones (PR de cada repo).
   --nombres               Con el modo completo: además, los documentos base de cada repo apuntado (Markdown de la
-                          raíz y de docs/, sin docs/investigaciones/ ni CHANGELOG.md) no nombran un repo, un check
-                          ni un archivo que no existe (mariomina/.github#55). El inventario sale de los punteros,
-                          del árbol de cada repo y de los workflows con pull_request: nada que mantener a mano.
+                          raíz y de docs/, sin docs/investigaciones/ ni CHANGELOG.md) no nombran un repo ni un
+                          check que no existe (mariomina/.github#55). El inventario sale de los punteros y de los
+                          workflows con pull_request de cada repo: nada que mantener a mano.
 
 Violaciones (salida 1): repo apuntado sin AGENTS.md o sin tipo-repo válido; `autonomia: N` sin declarar, fuera de 0–2,
 o distinto de 0 en un home repo o en .github (mariomina/mario-home#19); regla global repetida
-en un repo; repo que declara una excepción a una regla global; con --nombres, nombre-repo, nombre-check y
-nombre-archivo.
+en un repo; repo que declara una excepción a una regla global; con --nombres, nombre-repo y nombre-check.
 Avisos (salida 0): repo con git en ~/Documentos/Mario (o en una carpeta de grupo sin git, como
 mario-agencia/) que no está en ningún puntero.
 Salida JSON en stdout.
@@ -196,11 +195,12 @@ def revisar_nombres(repos, otros_nombres, violaciones):
 
     repos: {nombre: {"textos": {ruta: texto}}}, con los documentos y los workflows de cada repo apuntado.
     otros_nombres: nombres de los punteros sin leer y de las carpetas locales y de grupo (mario-github, mario-agencia).
-    Las rutas de archivo no se comprueban: medido el 18-11 sobre los 11 repos, 120 avisos y ningún nombre
-    desfasado que no vieran ya las 2 reglas (rutas de otros repos, de ~/.claude, etiquetas y prefijos de rama).
+    Las rutas de archivo no se comprueban: medido el 18-11 sobre los repos apuntados, 120 avisos y ningún nombre
+    desfasado que no vieran ya las 2 reglas (rutas de otros repos y del home, etiquetas, prefijos de rama).
     """
     cortos = {n.split("/")[-1] for n in repos} | set(otros_nombres)
-    re_dueno = re.compile(rf"\b({'|'.join(sorted({re.escape(n.split('/')[0]) for n in repos if '/' in n}))})"
+    duenos = "|".join(sorted({re.escape(n.split("/")[0]) for n in repos if "/" in n})) or "(?!)"
+    re_dueno = re.compile(rf"\b({duenos})"
                           r"/([\w.-]+?)(?:\.git)?(?![\w.<-])")
     checks = inventario_checks(repos)
     for nombre, r in repos.items():
