@@ -11,6 +11,11 @@ filtro = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(filtro)
 
 REGLA = "Ningún push, PR, merge ni cambio en main sin aprobación explícita de Mario."
+LINEA_148 = ("- **Skill compartida:** carpeta en `skills/<categoría>/<id>/` con su `SKILL.md`, cuyo `name` es `<id>` y es "
+             "único en todo el repo. Después, `python3 -I entorno/conectar_arneses.py`. Una skill se mueve aquí cuando la "
+             "usan 2 repos. Excepción: `sistema/verify-mario-home`, la verificación de este repo, vive aquí para que "
+             "todos los arneses la lean sin carpeta de arnés (decisión 2 de `docs/investigaciones/sistema-objetivo.md`). "
+             "Una categoría nueva nace cuando la piden 2 skills, con su `DESCRIPTION.md`.")
 
 
 def home_md(punteros):
@@ -69,6 +74,17 @@ class FiltroGlobal(unittest.TestCase):
         self.repo("mario-home", home_md(["a"]))
         self.repo("a", "# a\n\ntipo-repo: producto\nautonomia: 0\n\n- Excepción: aquí no aplica la regla global de aprobación.\n")
         self.assertEqual(self.reglas(self.correr()), [("o/a", "excepcion-a-global")])
+
+    def test_excepcion_a_regla_del_home_no_es_global(self):
+        """#56: línea 133 del primer commit de mariomina/mario-home#148, fuera de «Reglas globales»."""
+        self.repo("mario-home", home_md([]) + "\n## Cómo añadir contenido\n\n" + LINEA_148 + "\n")
+        r = self.correr()
+        self.assertTrue(r["valido"], r["violaciones"])
+
+    def test_excepcion_en_reglas_globales_del_home(self):
+        self.repo("mario-home", home_md([]).replace(f"- {REGLA}\n", f"- {REGLA}\n- Excepción: en mario-home no aplica.\n"))
+        self.assertEqual([(v["repo"], v["regla"], v["linea"]) for v in self.correr()["violaciones"]],
+                         [("mario-home", "excepcion-a-global", 9)])
 
     def test_sin_agents_md_y_sin_tipo(self):
         self.repo("mario-home", home_md(["a", "b"]))
