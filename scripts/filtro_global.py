@@ -144,8 +144,13 @@ def revisar_estructura(nombre, texto, violaciones):
                                                       or nombre.rstrip("/").endswith("/.github")):
         violaciones.append({"repo": nombre, "regla": "autonomia-fija-en-0",
                             "detalle": "los home repos y .github fijan las reglas: su nivel es siempre 0"})
+    # En el home que define las reglas globales, el resto de su texto son reglas de su nivel (#56).
+    define_globales = bool(tipo and tipo.group(1) == "home" and seccion(texto, "Reglas globales").strip())
+    actual = None
     for n, linea in enumerate(texto.splitlines(), 1):
-        if RE_EXCEPCION.search(linea):
+        if titulo := re.match(r"##\s+(.*?)\s*$", linea):
+            actual = titulo.group(1)
+        if (not define_globales or actual == "Reglas globales") and RE_EXCEPCION.search(linea):
             violaciones.append({"repo": nombre, "regla": "excepcion-a-global", "linea": n,
                                 "detalle": "la regla global debe bajar de nivel, no exceptuarse"})
     return tipo.group(1) if tipo else None
