@@ -471,6 +471,78 @@ class Proyectos(unittest.TestCase):
         self.assertNotIn("pullRequests", gp.FRAGMENTO_PROYECTOS)  # solo lo que la App no ve
 
 
+def priorizada(numero, titulo, puesta, tipo="Tarea", cuerpo="", paso=None, bloquea=(), proyecto="PRJ",
+               descripcion="Sistema · Paso actual: Paso 4"):
+    """Issue abierta en un Project con su Prioridad (`puesta`), como la devuelve ISSUES con prioridad.py."""
+    item = {"fieldValueByName": None, "project": {"id": proyecto, "shortDescription": descripcion},
+            "prioridad": {"name": puesta} if puesta else None, "paso": {"name": paso} if paso else None}
+    return {"id": f"I{numero}", "number": numero, "title": titulo, "url": f"u{numero}", "body": cuerpo,
+            "createdAt": iso(timedelta(days=numero)), "issueType": {"name": tipo}, "labels": {"nodes": []},
+            "blocking": {"nodes": [{"id": b, "state": "OPEN"} for b in bloquea]}, "reactions": {"totalCount": 0},
+            "projectItems": {"totalCount": 1, "nodes": [item]}}
+
+
+class Prioridad(unittest.TestCase):
+    """Avisos de prioridad (mariomina/mario-home#239): la puesta frente a la calculada por prioridad.py."""
+
+    def avisos(self, *issues, principal="SUCCESS", sin_proyectos=()):
+        nodos = {"o/a": {**repo(principal=principal), "issues": {"nodes": list(issues)}}}
+        estado = gp.analizar(nodos, [], AHORA, sin_proyectos=sin_proyectos)
+        return [(a["tipo"], a["detalle"]) for a in estado["avisos"] if a["tipo"].startswith("prioridad")]
+
+    def test_nivel_distinto_sin_motivo_avisa(self):
+        self.assertEqual(self.avisos(priorizada(228, "TMPDIR en Hermes", "P2", tipo="Bug")),
+                         [("prioridad-distinta", ("#228 TMPDIR en Hermes (puesta P2; calculada P1: Bug en uso; "
+                                                  "sin «Motivo de prioridad:»)"))])
+
+    def test_con_motivo_no_avisa(self):
+        self.assertEqual(self.avisos(priorizada(228, "TMPDIR en Hermes", "P2", tipo="Bug",
+                                                cuerpo="Motivo de prioridad: solo afecta a un perfil de prueba")), [])
+
+    def test_igual_o_sin_prioridad_no_avisa(self):
+        self.assertEqual(self.avisos(priorizada(1, "Nota", "P2"), priorizada(2, "Nota", None)), [])
+
+    def test_p0_que_ya_no_se_cumple_avisa_aunque_tenga_motivo(self):
+        self.assertEqual(self.avisos(priorizada(3, "Nota", "P0", cuerpo="Motivo de prioridad: urgente")),
+                         [("prioridad-p0-caducada", "#3 Nota (puesta P0; calculada P2: el resto)")])
+
+    def test_paso_actual_y_bloqueo_con_el_contexto_del_project(self):
+        del_paso = priorizada(207, "Cola de agentes", "P1", paso="Paso 4")
+        bloqueante = priorizada(227, "delegate_task en Hermes", "P2", bloquea=["I207"])
+        otro = priorizada(5, "Cola de agentes", "P2", paso="Paso 4", proyecto="CLIENTE", descripcion="Cliente")
+        self.assertEqual([d.split(" (")[0] for _, d in self.avisos(del_paso, bloqueante, otro)], ["#227 delegate_task en Hermes"])
+
+    def test_ci_rojo_da_p0_al_elemento_de_ci(self):
+        self.assertEqual(self.avisos(priorizada(9, "fix(ci): main en rojo", "P2"), principal="FAILURE"),
+                         [("prioridad-distinta", ("#9 fix(ci): main en rojo (puesta P2; calculada P0: CI rojo en la "
+                                                  "rama principal; sin «Motivo de prioridad:»)"))])
+
+    def test_repo_que_no_ve_los_projects_no_avisa(self):
+        self.assertEqual(self.avisos(priorizada(228, "TMPDIR", "P2", tipo="Bug"), sin_proyectos={"o/a"}), [])
+
+    def test_la_consulta_pide_los_campos_de_la_regla(self):
+        for campo in ("blocking", "issueType", "reactions", "shortDescription", 'fieldValueByName(name: "Prioridad")'):
+            self.assertIn(campo, gp.FRAGMENTO_PROYECTOS)
+            self.assertIn(campo, gp.FRAGMENTO)
+
+    def test_sin_prioridad_py_el_script_carga_y_lo_dice(self):
+        # El job de la PR de versión y el barrido de mario-home traen solo algunos scripts (checkout parcial).
+        with tempfile.TemporaryDirectory() as d:
+            copia = Path(d) / "github_pendientes.py"
+            copia.write_text(RUTA.read_text(encoding="utf-8"), encoding="utf-8")
+            s = importlib.util.spec_from_file_location("gp_parcial", copia)
+            parcial = importlib.util.module_from_spec(s)
+            s.loader.exec_module(parcial)
+        self.assertIsNone(parcial.prioridad)
+        self.assertNotIn("blocking", parcial.FRAGMENTO)
+        self.assertNotIn("CAMPOS", parcial.FRAGMENTO)
+        self.assertEqual(parcial.avisos_prioridad([("o/a", priorizada(1, "x", "P0"))], set()), [])
+        with mock.patch.object(gp, "prioridad", None):
+            estado, _ = recoger({"o/a": repo()})
+        self.assertIn({"repo": "prioridad", "detalle": "sin scripts/prioridad.py junto a este script: sin avisos "
+                       "prioridad-distinta ni prioridad-p0-caducada"}, estado["errores"])
+
+
 class Linea(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

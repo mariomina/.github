@@ -13,7 +13,9 @@ Decisiones de Mario (mariomina/mario-2-cerebro#280):
   - Avisos (nunca se borra ni se cierra nada): workflow desactivado por 60 días sin actividad (no vuelve
     con ningún trigger: el aviso da el `gh workflow enable` que lo recupera), CI rojo en la rama principal,
     ramas sin PR y PR de más de 7 días, issues abiertos sin proyecto, issues en Listo del Project a las que
-    les falta un campo obligatorio de .github/ISSUE_TEMPLATE/2-tarea.yml (listo-sin-contrato, mario-home#207).
+    les falta un campo obligatorio de .github/ISSUE_TEMPLATE/2-tarea.yml (listo-sin-contrato, mario-home#207),
+    issues cuya Prioridad del Project no es la que calcula scripts/prioridad.py y no dan «Motivo de prioridad:»
+    (prioridad-distinta), y P0 que ya no se cumplen, con motivo o sin él (prioridad-p0-caducada; mario-home#239).
 
 Métricas (mariomina/mario-home#22), últimos 7 y 28 días, desde el historial de GitHub (sin guardar nada):
   - fusionadas y, de ellas, por bots: creadas y fusionadas por la App, github-actions o Dependabot. El resto no
@@ -64,6 +66,22 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True  # cargar filtro_global.py no deja __pycache__ en scripts/
 
+
+def _cargar(nombre):
+    """Un script hermano por ruta (con `python3 -I` su carpeta no está en sys.path), o None si no está."""
+    ruta = Path(__file__).resolve().parent / f"{nombre}.py"
+    if not ruta.exists():
+        return None
+    spec = importlib.util.spec_from_file_location(nombre, ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+# Las reglas de prioridad (mariomina/mario-home#239). Opcional: un checkout parcial que solo trae este script (el
+# job de la PR de versión) no las necesita; sin ellas, el barrido lo dice en `errores` y no avisa de prioridades.
+prioridad = _cargar("prioridad")
+
 API = "https://api.github.com"
 HOME_REPO = "mariomina/mario-home"
 FRENO = "FRENO:"
@@ -109,8 +127,10 @@ FRAGMENTO_METRICAS = f"""fragment M on Repository {{
   {FUSIONADAS.replace("CURSOR", "")}
 }}"""
 
-ISSUES = """issues(states: OPEN, first: 100) { nodes { number title url body projectItems(first: 10) { totalCount
-    nodes { fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } }"""
+ISSUES = """issues(states: OPEN, first: 100) { nodes { number title url body CAMPOS projectItems(first: 10) { totalCount
+    nodes { fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } ITEM } } } }"""
+ISSUES = (ISSUES.replace("CAMPOS", prioridad.CAMPOS_ISSUE).replace("ITEM", "project { id shortDescription } " + prioridad.CAMPOS_ITEM)
+          if prioridad else ISSUES.replace("CAMPOS ", "").replace(" ITEM", ""))
 FRAGMENTO = """fragment R on Repository {
   nameWithOwner mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
   defaultBranchRef { name target { ... on Commit { history(first: 5) { nodes { statusCheckRollup { state } } } } } }
@@ -179,10 +199,7 @@ def token_de(repo, token):
 
 def cargar_filtro():
     """filtro_global.py por ruta: con `python3 -I` la carpeta del script no está en sys.path."""
-    spec = importlib.util.spec_from_file_location("filtro_global", Path(__file__).resolve().parent / "filtro_global.py")
-    modulo = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modulo)
-    return modulo
+    return _cargar("filtro_global") or sys.exit("falta filtro_global.py junto a github_pendientes.py")
 
 
 def repos(filtro):
@@ -372,11 +389,42 @@ def faltan(cuerpo, etiquetas):
     return [e for e in etiquetas if e.strip().casefold() not in llenas]
 
 
+def avisos_prioridad(issues, rojos):
+    """Avisos de las issues cuya Prioridad no es la calculada. `issues`: [(repo, issue)] de los repos que ven los
+    Projects; `rojos`: repos con CI rojo en la rama principal. El contexto (paso actual) es el de cada Project."""
+    if not prioridad:
+        return []
+    por_proyecto = {}
+    for repo, i in issues:
+        for item in (i.get("projectItems") or {}).get("nodes") or []:
+            if item and item.get("project"):
+                por_proyecto.setdefault(item["project"]["id"], []).append(
+                    (repo, i, item, prioridad.desde_graphql(i, item, repo in rojos)))
+    avisos = []
+    for filas in por_proyecto.values():
+        paso = prioridad.paso_actual(filas[0][2]["project"].get("shortDescription"))
+        ctx = prioridad.contexto([e for *_, e in filas], paso)
+        for repo, i, item, e in filas:
+            puesta = (item.get("prioridad") or {}).get("name")
+            if puesta not in prioridad.NIVELES:
+                continue  # sin Prioridad: la pone el sync
+            calculada = prioridad.prioridad(e, ctx)
+            if puesta == calculada.nivel:
+                continue
+            detalle = f"#{i['number']} {i['title']} (puesta {puesta}; calculada {calculada.nivel}: {calculada.motivo}"
+            if puesta == "P0":
+                avisos.append({"repo": repo, "tipo": "prioridad-p0-caducada", "detalle": detalle + ")", "url": i.get("url")})
+            elif not prioridad.tiene_motivo(i.get("body")):
+                avisos.append({"repo": repo, "tipo": "prioridad-distinta",
+                               "detalle": detalle + "; sin «Motivo de prioridad:»)", "url": i.get("url")})
+    return avisos
+
+
 def analizar(nodos, errores, ahora, sin_proyectos=(), contrato=()):
     """Estado completo desde las respuestas de GitHub: PR clasificadas, avisos y errores.
     `sin_proyectos`: repos cuyo token no ve los Projects; sin avisos de Projects (serían falsos).
     `contrato`: etiquetas obligatorias de la Tarea; sin ellas, no hay aviso listo-sin-contrato."""
-    prs, avisos = [], []
+    prs, avisos, con_proyectos, rojos = [], [], [], set()
     for repo, n in nodos.items():
         if not n:
             if not any(e["repo"] == repo for e in errores):
@@ -397,6 +445,7 @@ def analizar(nodos, errores, ahora, sin_proyectos=(), contrato=()):
         estado = next((c["statusCheckRollup"].get("state") for c in historia if c.get("statusCheckRollup")), None)
         if estado in ("FAILURE", "ERROR"):
             avisos.append({"repo": repo, "tipo": "ci-rojo", "detalle": f"CI rojo en {principal.get('name')}"})
+            rojos.add(repo)
         con_pr = {pr.get("headRefName") for pr in abiertas}
         for ref in (n.get("refs") or {}).get("nodes") or []:
             fecha = (ref.get("target") or {}).get("committedDate")
@@ -406,6 +455,7 @@ def analizar(nodos, errores, ahora, sin_proyectos=(), contrato=()):
                 avisos.append({"repo": repo, "tipo": "rama-vieja",
                                "detalle": f"{ref['name']} (último commit {fecha[:10]}, sin PR)"})
         for i in [] if repo in sin_proyectos else (n.get("issues") or {}).get("nodes") or []:
+            con_proyectos.append((repo, i))
             items = i.get("projectItems") or {}
             if not items.get("totalCount"):
                 avisos.append({"repo": repo, "tipo": "issue-sin-proyecto", "detalle": f"#{i['number']} {i['title']}",
@@ -415,6 +465,7 @@ def analizar(nodos, errores, ahora, sin_proyectos=(), contrato=()):
             if falta:
                 avisos.append({"repo": repo, "tipo": "listo-sin-contrato",
                                "detalle": f"#{i['number']} {i['title']} (falta: {', '.join(falta)})", "url": i.get("url")})
+    avisos += avisos_prioridad(con_proyectos, rojos)
     return {"generado": ahora.isoformat(timespec="seconds"), "repos": list(nodos), "prs": prs,
             "avisos": avisos, "errores": errores}
 
@@ -464,6 +515,9 @@ def recoger(token, ahora=None):
         motivo = "no existe" if plantilla is None else "sin campos obligatorios"
     except (OSError, ValueError, KeyError) as e:
         plantilla, motivo = None, f"{type(e).__name__}: {e}"
+    if not prioridad:
+        errores.append({"repo": "prioridad", "detalle": "sin scripts/prioridad.py junto a este script: "
+                        "sin avisos prioridad-distinta ni prioridad-p0-caducada"})
     etiquetas = contrato(plantilla or "")
     if not etiquetas:
         errores.append({"repo": "contrato", "detalle": f"{'/'.join(PLANTILLA_TAREA)}: {motivo}"[:160]})
