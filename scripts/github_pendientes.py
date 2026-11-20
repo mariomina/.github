@@ -107,6 +107,8 @@ FRAGMENTO_METRICAS = f"""fragment M on Repository {{
   {FUSIONADAS.replace("CURSOR", "")}
 }}"""
 
+ISSUES = """issues(states: OPEN, first: 100) { nodes { number title url body projectItems(first: 10) { totalCount
+    nodes { fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } }"""
 FRAGMENTO = """fragment R on Repository {
   nameWithOwner mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed
   defaultBranchRef { name target { ... on Commit { history(first: 5) { nodes { statusCheckRollup { state } } } } } }
@@ -115,9 +117,8 @@ FRAGMENTO = """fragment R on Repository {
     commits(last: 1) { nodes { commit { ROLLUP } } } } }
   refs(refPrefix: "refs/heads/", first: 100, orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
     nodes { name target { ... on Commit { committedDate } } } }
-  issues(states: OPEN, first: 100) { nodes { number title url body projectItems(first: 10) { totalCount
-    nodes { fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } }
-}""".replace("ROLLUP", ROLLUP)
+  ISSUES
+}""".replace("ROLLUP", ROLLUP).replace("ISSUES", ISSUES)
 
 
 class Fallo(Exception):
@@ -140,11 +141,16 @@ def obtener_token():
     for var in ("GH_TOKEN", "GITHUB_TOKEN"):
         if os.environ.get(var):
             return os.environ[var]
+    return gh_auth_token()
+
+
+def gh_auth_token(entorno=None):
+    """`gh auth token` o None. `entorno`: el del proceso `gh` (None: el de este proceso)."""
     gh = shutil.which("gh") or ("/app/bin/gh" if os.path.exists("/app/bin/gh") else None)  # /app/bin: Flatpak
     if not gh:
         return None
     try:
-        p = subprocess.run([gh, "auth", "token"], capture_output=True, text=True, timeout=5, check=False)
+        p = subprocess.run([gh, "auth", "token"], capture_output=True, text=True, timeout=5, check=False, env=entorno)
     except (OSError, subprocess.SubprocessError):
         return None
     return p.stdout.strip() or None
