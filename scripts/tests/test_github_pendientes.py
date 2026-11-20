@@ -124,6 +124,7 @@ class Clasificacion(unittest.TestCase):
             pr(12, "chore: release", "release-please--branches--b", "mariomina-automatizacion[bot]", ci="FAILURE"),
             pr(13, "chore: release", "release-please--branches--c", "mariomina-automatizacion", ci="PENDING"),
             pr(14, "chore: release", "release-please--branches--d", "app/mariomina-automatizacion", ci="SUCCESS"),
+            pr(15, "chore: release", "release-please--branches--e", "app/automatizador", ci="SUCCESS"),
         ])}
         estado = gp.analizar(nodos, [], AHORA)
         self.assertEqual(acciones(estado), {
@@ -133,12 +134,14 @@ class Clasificacion(unittest.TestCase):
             ("o/a", 7): ("dependabot-mayor", "decision"), ("o/a", 8): ("dependabot-mayor", "decision"),
             ("o/a", 9): ("trabajo", "decision"), ("o/a", 10): ("trabajo", "borrador"),
             ("o/a", 11): ("version", "decision"), ("o/a", 12): ("version", "decision"),
-            ("o/a", 13): ("version", "esperar"), ("o/a", 14): ("version", "fusionar")})
+            ("o/a", 13): ("version", "esperar"), ("o/a", 14): ("version", "fusionar"),
+            ("o/a", 15): ("version", "fusionar")})
         self.assertEqual(next(p["motivo"] for p in estado["prs"] if p["numero"] == 3),
                          "Dependabot: falta veredicto y permiso")
         motivos = {p["numero"]: p["motivo"] for p in estado["prs"] if p["clase"] == "version"}
         self.assertEqual(motivos, {1: "CI en curso", 2: "CI en verde", 11: "PR de versión sin CI",
-                                   12: "PR de versión con CI rojo", 13: "CI en curso", 14: "CI en verde"})
+                                   12: "PR de versión con CI rojo", 13: "CI en curso", 14: "CI en verde",
+                                   15: "CI en verde"})
 
     def test_ramas_de_version_o_dependabot_desde_un_fork_son_trabajo(self):
         rama_rp = "release-please--branches--main"
