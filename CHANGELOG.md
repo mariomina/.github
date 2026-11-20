@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.0](https://github.com/mariomina/.github/compare/v1.16.0...v1.17.0) (2026-11-20)
+
+
+### Novedades
+
+* **pendientes:** reconoce la App automatizador-m además de su nombre anterior ([#73](https://github.com/mariomina/.github/issues/73)) ([7959911](https://github.com/mariomina/.github/commit/795991127e0feb1f59f9cc1d5c708e1fe2573a50))
+
 ## [1.16.0](https://github.com/mariomina/.github/compare/v1.15.0...v1.16.0) (2026-11-20)
 
 
