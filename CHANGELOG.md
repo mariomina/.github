@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.15.0](https://github.com/mariomina/.github/compare/v1.14.0...v1.15.0) (2026-11-20)
+
+
+### Novedades
+
+* **pendientes:** avisos de Project también con un token de App (token_proyectos) ([#69](https://github.com/mariomina/.github/issues/69)) ([1d0cb39](https://github.com/mariomina/.github/commit/1d0cb3905697204a9c35144460476073899f9bf8))
+* **proyectos_sync:** añadir issues cerradas y PR desde la fecha de corte ([#68](https://github.com/mariomina/.github/issues/68)) ([cca12a8](https://github.com/mariomina/.github/commit/cca12a818f583f5dc6cf2bb1a2cbb34770c919a0))
+
+
+### Documentación
+
+* **contributing:** alta configurada de issues y PR, y áreas por repo ([#67](https://github.com/mariomina/.github/issues/67)) ([2edb2eb](https://github.com/mariomina/.github/commit/2edb2eb6c4d7ffb5b77b27995ed6007cacbdc4b6)), closes [#66](https://github.com/mariomina/.github/issues/66)
+
 ## [1.14.0](https://github.com/mariomina/.github/compare/v1.13.1...v1.14.0) (2026-11-20)
 
 
