@@ -42,19 +42,41 @@ def version(numero, ci="SUCCESS"):
               "mariomina-automatizacion", ci=ci)
 
 
+def issue(numero, items=1, status=None, cuerpo=""):
+    """Issue abierta en `items` Projects; con `status`, el valor de su campo Status en el primero."""
+    nodos = [{"fieldValueByName": {"name": status} if status else None}] if items else []
+    return {"number": numero, "title": f"issue {numero}", "url": "u", "body": cuerpo,
+            "projectItems": {"totalCount": items, "nodes": nodos}}
+
+
 def repo(prs=(), principal="SUCCESS", ramas=(), issues=(), merge=True, historia=None):
+    """issues: tuplas con los argumentos de issue()."""
     historia = [{"statusCheckRollup": {"state": e} if e else None} for e in (historia or [principal])]
     return {"mergeCommitAllowed": merge, "squashMergeAllowed": True, "rebaseMergeAllowed": True,
             "defaultBranchRef": {"name": "main", "target": {"history": {"nodes": historia}}},
             "pullRequests": {"nodes": list(prs)},
             "refs": {"nodes": [{"name": "main", "target": {"committedDate": iso(timedelta(days=30))}}]
                      + [{"name": n, "target": {"committedDate": iso(e)}} for n, e in ramas]},
-            "issues": {"nodes": [{"number": n, "title": f"issue {n}", "url": "u",
-                                  "projectItems": {"totalCount": t}} for n, t in issues]}}
+            "issues": {"nodes": [issue(*i) for i in issues]}}
 
 
 def acciones(estado):
     return {(p["repo"], p["numero"]): (p["clase"], p["accion"]) for p in estado["prs"]}
+
+
+def recoger(nodos, token="t", plantilla=PLANTILLA, entorno=None, metricas=None):
+    """(gp.recoger sin red, filtro_global simulado). `plantilla`: texto de 2-tarea.yml en GitHub, None si no
+    existe o la excepción al leerla; `metricas`: la excepción de consultar_metricas."""
+    lectura = "leer_remoto.side_effect" if isinstance(plantilla, Exception) else "leer_remoto.return_value"
+    filtro = mock.Mock(**{lectura: plantilla})
+    with mock.patch.object(gp, "cargar_filtro", return_value=filtro), \
+            mock.patch.object(gp, "repos", return_value=list(nodos)), \
+            mock.patch.object(gp, "consultar", return_value=(nodos, [])), \
+            mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
+            mock.patch.object(gp, "consultar_metricas", return_value={}, side_effect=metricas), \
+            mock.patch.object(gp, "freno", return_value=None), \
+            mock.patch.dict("os.environ", entorno or {}):
+        return gp.recoger(token, AHORA), filtro
 
 
 class Clasificacion(unittest.TestCase):
@@ -156,15 +178,10 @@ class Clasificacion(unittest.TestCase):
         self.assertEqual(avisos, [("o/b", "issue-sin-proyecto")])
 
     def test_recoger_trata_los_tokens_de_app_como_ciegos_a_projects(self):
-        nodos = {"o/a": repo(issues=[(5, 0)]), "e/w": repo(issues=[(7, 0)])}
-        with mock.patch.object(gp, "repos", return_value=["o/a", "e/w"]), \
-                mock.patch.object(gp, "consultar", return_value=(nodos, [])), \
-                mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
-                mock.patch.object(gp, "consultar_metricas", return_value={}), \
-                mock.patch.object(gp, "freno", return_value=None), \
-                mock.patch.dict("os.environ", {"GH_TOKEN_E": "gho_usuario"}):
-            avisos = [(a["repo"], a["tipo"]) for a in gp.recoger("ghs_app", AHORA)["avisos"]]
-        self.assertEqual(avisos, [("e/w", "issue-sin-proyecto")])
+        nodos = {"o/a": repo(issues=[(5, 0), (6, 1, "Listo")]), "e/w": repo(issues=[(7, 0), (8, 1, "Listo")])}
+        estado, _ = recoger(nodos, "ghs_app", entorno={"GH_TOKEN_E": "gho_usuario"})
+        avisos = [(a["repo"], a["tipo"]) for a in estado["avisos"]]
+        self.assertEqual(avisos, [("e/w", "issue-sin-proyecto"), ("e/w", "listo-sin-contrato")])
 
     def test_repo_sin_acceso_es_error(self):
         estado = gp.analizar({"o/a": None}, [], AHORA)
@@ -212,6 +229,46 @@ class Contrato(unittest.TestCase):
         texto = cuerpo(Objetivo=None) + "\n\n## objetivo\n\n### Detalle\n\nX\n\n## Fin"
         self.assertEqual(gp.faltan(texto, CONTRATO), [])
         self.assertEqual(gp.faltan("## Objetivo\n\n## Otro\n\nX", ("Objetivo",)), ["Objetivo"])
+
+
+class ListoSinContrato(unittest.TestCase):
+    """Aviso de una issue en Listo a la que le falta un campo del contrato (mariomina/mario-home#207)."""
+
+    def avisos(self, issues, **kw):
+        estado = gp.analizar({"o/a": repo(issues=issues)}, [], AHORA, **kw)
+        return [a["detalle"] for a in estado["avisos"] if a["tipo"] == "listo-sin-contrato"]
+
+    def test_avisa_a_la_issue_en_listo_incompleta(self):
+        incompleta = cuerpo(Prueba=None, Restricciones="_No response_")
+        self.assertEqual(self.avisos([(8, 1, "Listo", incompleta)], contrato=CONTRATO),
+                         ["#8 issue 8 (falta: Prueba, Restricciones)"])
+
+    def test_no_avisa_a_la_completa_ni_en_otro_estado(self):
+        issues = [(1, 1, "Listo", cuerpo()), (2, 1, "En curso", ""), (3, 1, None, ""), (4, 0, None, "")]
+        self.assertEqual(self.avisos(issues, contrato=CONTRATO), [])
+
+    def test_listo_en_cualquiera_de_sus_projects(self):
+        i = issue(8, 2, "Listo", "")
+        i["projectItems"]["nodes"].insert(0, {"fieldValueByName": {"name": "Hecho"}})
+        estado = gp.analizar({"o/a": repo() | {"issues": {"nodes": [i]}}}, [], AHORA, contrato=("Objetivo",))
+        self.assertEqual([a["tipo"] for a in estado["avisos"]], ["listo-sin-contrato"])
+
+    def test_no_avisa_en_repo_sin_proyectos_ni_sin_contrato(self):
+        incompleta = [(8, 1, "Listo", "")]
+        self.assertEqual(self.avisos(incompleta, contrato=CONTRATO, sin_proyectos={"o/a"}), [])
+        self.assertEqual(self.avisos(incompleta), [])
+
+    def test_recoger_lee_el_contrato_de_la_plantilla_en_github(self):
+        estado, filtro = recoger({"o/a": repo(issues=[(8, 1, "Listo", cuerpo(Prueba=None))])})
+        filtro.leer_remoto.assert_called_once_with("mariomina/.github", ".github/ISSUE_TEMPLATE/2-tarea.yml")
+        self.assertEqual([a["detalle"] for a in estado["avisos"]], ["#8 issue 8 (falta: Prueba)"])
+        self.assertEqual(estado["errores"], [])
+
+    def test_recoger_con_la_plantilla_ilegible_deja_un_error_y_no_avisa(self):
+        for plantilla in (None, urllib.error.URLError("dns"), "body:\n  - type: markdown\n"):
+            estado, _ = recoger({"o/a": repo(issues=[(8, 1, "Listo", "")])}, plantilla=plantilla)
+            self.assertEqual(estado["avisos"], [], plantilla)
+            self.assertEqual([e["repo"] for e in estado["errores"]], ["contrato"], plantilla)
 
 
 class Repos(unittest.TestCase):
@@ -427,13 +484,7 @@ class Metricas(unittest.TestCase):
         self.assertEqual(gp.linea_metricas(None), "")
 
     def test_un_fallo_de_metricas_no_tumba_recoger(self):
-        with mock.patch.object(gp, "repos", return_value=["o/a"]), \
-                mock.patch.object(gp, "consultar", return_value=({"o/a": repo()}, [])), \
-                mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
-                mock.patch.object(gp, "consultar_metricas", side_effect=TimeoutError("lento")), \
-                mock.patch.object(gp, "freno", return_value=None), \
-                mock.patch.dict("os.environ", {}):
-            estado = gp.recoger("t", AHORA)
+        estado, _ = recoger({"o/a": repo()}, metricas=TimeoutError("lento"))
         self.assertNotIn("metricas", estado)
         self.assertEqual(estado["errores"], [{"repo": "métricas", "detalle": "TimeoutError: lento"}])
 

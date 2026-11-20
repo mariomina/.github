@@ -12,7 +12,8 @@ Decisiones de Mario (mariomina/mario-2-cerebro#280):
   - PR de trabajo: espera la decisión de Mario.
   - Avisos (nunca se borra ni se cierra nada): workflow desactivado por 60 días sin actividad (no vuelve
     con ningún trigger: el aviso da el `gh workflow enable` que lo recupera), CI rojo en la rama principal,
-    ramas sin PR y PR de más de 7 días, issues abiertos sin proyecto.
+    ramas sin PR y PR de más de 7 días, issues abiertos sin proyecto, issues en Listo del Project a las que
+    les falta un campo obligatorio de .github/ISSUE_TEMPLATE/2-tarea.yml (listo-sin-contrato, mario-home#207).
 
 Métricas (mariomina/mario-home#22), últimos 7 y 28 días, desde el historial de GitHub (sin guardar nada):
   - fusionadas y, de ellas, por bots: creadas y fusionadas por la App, github-actions o Dependabot. El resto no
@@ -93,6 +94,8 @@ RE_ELEMENTO = re.compile(r"^\s*-\s+type:\s*(\S+)")              # elemento del `
 RE_ATRIBUTO = re.compile(r"^\s*(label|required):\s*(.*?)\s*$")
 RE_ENCABEZADO = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*$")
 SIN_RESPUESTA = "_No response_"  # lo que GitHub escribe en un campo vacío de un formulario de issue
+LISTO = "Listo"  # Status del Project para una issue lista para un agente (cola de autopilot-stack)
+PLANTILLA_TAREA = ("mariomina/.github", ".github/ISSUE_TEMPLATE/2-tarea.yml")  # sus campos obligatorios: el contrato
 BOTS = {"github-actions", "mariomina-automatizacion", "dependabot"}
 VENTANAS = (7, 28)  # días
 HISTORIA = """history(since: "DESDE", first: 100CURSOR) { pageInfo { hasNextPage endCursor }
@@ -112,7 +115,8 @@ FRAGMENTO = """fragment R on Repository {
     commits(last: 1) { nodes { commit { ROLLUP } } } } }
   refs(refPrefix: "refs/heads/", first: 100, orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
     nodes { name target { ... on Commit { committedDate } } } }
-  issues(states: OPEN, first: 100) { nodes { number title url projectItems(first: 1) { totalCount } } }
+  issues(states: OPEN, first: 100) { nodes { number title url body projectItems(first: 10) { totalCount
+    nodes { fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } }
 }""".replace("ROLLUP", ROLLUP)
 
 
@@ -340,9 +344,10 @@ def faltan(cuerpo, etiquetas):
     return [e for e in etiquetas if e.strip().casefold() not in llenas]
 
 
-def analizar(nodos, errores, ahora, sin_proyectos=()):
+def analizar(nodos, errores, ahora, sin_proyectos=(), contrato=()):
     """Estado completo desde las respuestas de GitHub: PR clasificadas, avisos y errores.
-    `sin_proyectos`: repos cuyo token no ve los Projects; sin aviso de issue sin proyecto (sería falso)."""
+    `sin_proyectos`: repos cuyo token no ve los Projects; sin avisos de Projects (serían falsos).
+    `contrato`: etiquetas obligatorias de la Tarea; sin ellas, no hay aviso listo-sin-contrato."""
     prs, avisos = [], []
     for repo, n in nodos.items():
         if not n:
@@ -373,9 +378,15 @@ def analizar(nodos, errores, ahora, sin_proyectos=()):
                 avisos.append({"repo": repo, "tipo": "rama-vieja",
                                "detalle": f"{ref['name']} (último commit {fecha[:10]}, sin PR)"})
         for i in [] if repo in sin_proyectos else (n.get("issues") or {}).get("nodes") or []:
-            if not (i.get("projectItems") or {}).get("totalCount"):
+            items = i.get("projectItems") or {}
+            if not items.get("totalCount"):
                 avisos.append({"repo": repo, "tipo": "issue-sin-proyecto", "detalle": f"#{i['number']} {i['title']}",
                                "url": i.get("url")})
+            listo = any(((p or {}).get("fieldValueByName") or {}).get("name") == LISTO for p in items.get("nodes") or [])
+            falta = faltan(i.get("body") or "", contrato) if listo else []
+            if falta:
+                avisos.append({"repo": repo, "tipo": "listo-sin-contrato",
+                               "detalle": f"#{i['number']} {i['title']} (falta: {', '.join(falta)})", "url": i.get("url")})
     return {"generado": ahora.isoformat(timespec="seconds"), "repos": list(nodos), "prs": prs,
             "avisos": avisos, "errores": errores}
 
@@ -398,11 +409,20 @@ def workflows_desactivados(nombres, token):
 
 def recoger(token, ahora=None):
     os.environ["GH_TOKEN"] = token  # filtro_global.leer_remoto lo lee del entorno
-    nombres = repos(cargar_filtro())
+    filtro = cargar_filtro()
+    nombres = repos(filtro)
     nodos, errores = consultar(nombres, token)
     # Un token de instalación de GitHub App (ghs_) no ve los Projects de una cuenta personal: totalCount sería 0.
     ciegos = {n for n in nombres if token_de(n, token).startswith("ghs_")}
-    estado = analizar(nodos, errores, ahora or datetime.now(timezone.utc), ciegos)
+    try:  # por la API: el barrido de mario-home solo tiene este script y filtro_global.py; nunca lo tumba
+        plantilla = filtro.leer_remoto(*PLANTILLA_TAREA)
+        motivo = "no existe" if plantilla is None else "sin campos obligatorios"
+    except (OSError, ValueError, KeyError) as e:
+        plantilla, motivo = None, f"{type(e).__name__}: {e}"
+    etiquetas = contrato(plantilla or "")
+    if not etiquetas:
+        errores.append({"repo": "contrato", "detalle": f"{'/'.join(PLANTILLA_TAREA)}: {motivo}"[:160]})
+    estado = analizar(nodos, errores, ahora or datetime.now(timezone.utc), ciegos, etiquetas)
     estado["avisos"] = workflows_desactivados(nombres, token) + estado["avisos"]
     try:
         estado["freno"] = freno(token)
