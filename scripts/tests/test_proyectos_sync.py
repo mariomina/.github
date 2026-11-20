@@ -252,6 +252,8 @@ class Prioridad(unittest.TestCase):
         for campo in ("blocking", "issueType", "reactions", 'fieldValueByName(name: "Paso")', "shortDescription"):
             self.assertIn(campo, ps.ITEMS + ps.ABIERTAS + ps.PROYECTOS)
         self.assertNotIn("blocking", ps.PRS)  # una PR no tiene «bloqueado por»
+        self.assertNotIn("blocking", ps.CERRADAS)  # lo cerrado no se prioriza: sin coste de más
+        self.assertIn("number", ps.ITEMS.split("content")[1])  # la simulación nombra repo#n
 
 
 class Principal(unittest.TestCase):

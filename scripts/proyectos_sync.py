@@ -52,12 +52,13 @@ ITEMS = """query($id:ID!,$after:String){ node(id:$id){ ... on ProjectV2{
   pageInfo{ hasNextPage endCursor }
   nodes{ id isArchived createdAt fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue{ optionId } }
     CAMPOS_ITEM
-    content{ __typename ... on Issue{ state closedAt repository{ nameWithOwner } CAMPOS_ISSUE }
-             ... on PullRequest{ state closedAt repository{ nameWithOwner } CAMPOS_PR } } } } } } }""".replace(
+    content{ __typename ... on Issue{ number state closedAt repository{ nameWithOwner } CAMPOS_ISSUE }
+             ... on PullRequest{ number state closedAt repository{ nameWithOwner } CAMPOS_PR } } } } } } }""".replace(
     "CAMPOS_ITEM", prioridad.CAMPOS_ITEM).replace("CAMPOS_ISSUE", prioridad.CAMPOS_ISSUE).replace(
     "CAMPOS_PR", prioridad.CAMPOS_PR)
 
-CONTENIDO = "__typename id number state closedAt updatedAt repository{ nameWithOwner } " + prioridad.CAMPOS_ISSUE
+CONTENIDO_CERRADA = "__typename id number state closedAt updatedAt"  # cerrada: sin prioridad, sin sus campos
+CONTENIDO = CONTENIDO_CERRADA + " repository{ nameWithOwner } " + prioridad.CAMPOS_ISSUE
 CONTENIDO_PR = "__typename id number state closedAt updatedAt repository{ nameWithOwner } " + prioridad.CAMPOS_PR
 
 ABIERTAS = """query($owner:String!,$name:String!,$after:String){ repository(owner:$owner,name:$name){
@@ -66,7 +67,7 @@ ABIERTAS = """query($owner:String!,$name:String!,$after:String){ repository(owne
 # `since` filtra por updatedAt, que nunca es anterior a closedAt.
 CERRADAS = """query($owner:String!,$name:String!,$after:String,$desde:DateTime!){ repository(owner:$owner,name:$name){
   issues(states:CLOSED, first:100, after:$after, filterBy:{since:$desde}){
-    pageInfo{ hasNextPage endCursor } nodes{ %s } } } }""" % CONTENIDO
+    pageInfo{ hasNextPage endCursor } nodes{ %s } } } }""" % CONTENIDO_CERRADA
 
 # Las PR no tienen `since`: se piden de la más a la menos actualizada y se deja de paginar al pasar el corte.
 PRS = """query($owner:String!,$name:String!,$after:String){ repository(owner:$owner,name:$name){
