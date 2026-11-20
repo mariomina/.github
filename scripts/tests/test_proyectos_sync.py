@@ -56,7 +56,9 @@ class GraphQLFalso:
     def __call__(self, query, **v):
         self.llamadas.append((query, v))
         if query == ps.ITEMS:
-            return {"node": {"items": pagina(self.items)}}
+            # Como la API: sin `archivedStates` que incluya ARCHIVED, los archivados no salen.
+            ver = "ARCHIVED," in query
+            return {"node": {"items": pagina([i for i in self.items if ver or not i["isArchived"]])}}
         if query == ps.ABIERTAS:
             return {"repository": {"issues": pagina(self.abiertas)}}
         if query == ps.CERRADAS:

@@ -36,7 +36,9 @@ PROYECTOS = """query($login:String!){ repositoryOwner(login:$login){ ... on Proj
   field(name:"Status"){ ... on ProjectV2SingleSelectField{ id options{ id name } } }
   repositories(first:50){ nodes{ nameWithOwner } } } } } } }"""
 
-ITEMS = """query($id:ID!,$after:String){ node(id:$id){ ... on ProjectV2{ items(first:100, after:$after){
+# `items` omite los archivados si no se piden: sin ellos, el auto-add los volvería a añadir.
+ITEMS = """query($id:ID!,$after:String){ node(id:$id){ ... on ProjectV2{
+  items(first:100, after:$after, archivedStates:[ARCHIVED, NOT_ARCHIVED]){
   pageInfo{ hasNextPage endCursor }
   nodes{ id isArchived createdAt fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue{ optionId } }
     content{ __typename ... on Issue{ id state closedAt } ... on PullRequest{ id state closedAt } } } } } } }"""
