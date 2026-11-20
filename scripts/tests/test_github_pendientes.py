@@ -439,17 +439,19 @@ class Proyectos(unittest.TestCase):
             self.assertIsNone(self.token("ghs_app", entorno, **kw)[0], caso)
 
     def test_recoger_con_token_de_app_lee_los_projects_con_el_token_que_los_ve(self):
-        # Con el token de App, la consulta principal ve totalCount 0 en todas las issues de o/a.
-        nodos = {"o/a": repo(principal="FAILURE", issues=[(5, 0), (6, 0), (7, 0)]), "e/w": repo(issues=[(8, 1)])}
+        # Con un token de App (o/a y e/w, cada dueño con el suyo), la consulta principal ve totalCount 0.
+        nodos = {"o/a": repo(principal="FAILURE", issues=[(5, 0), (6, 0), (7, 0)]), "e/w": repo(issues=[(8, 0)]),
+                 "u/x": repo(issues=[(9, 1)])}
         red = []
-        estado, _ = recoger(nodos, "ghs_app", entorno={"GH_TOKEN_E": "gho_usuario"}, tp="gho_mario",
-                            proyectos={"o/a": [(5, 0), (6, 1, "En curso"), (7, 1, "Listo", cuerpo(Prueba=None))]},
-                            red=red)
+        estado, _ = recoger(nodos, "ghs_app", entorno={"GH_TOKEN_E": "ghs_e", "GH_TOKEN_U": "gho_usuario"},
+                            tp="gho_mario", red=red,
+                            proyectos={"o/a": [(5, 0), (6, 1, "En curso"), (7, 1, "Listo", cuerpo(Prueba=None))],
+                                       "e/w": [(8, 1)]})
         avisos = [(a["repo"], a["tipo"], a["detalle"]) for a in estado["avisos"]]
         self.assertEqual(avisos, [("o/a", "ci-rojo", "CI rojo en main"), ("o/a", "issue-sin-proyecto", "#5 issue 5"),
                                   ("o/a", "listo-sin-contrato", "#7 issue 7 (falta: Prueba)")])
-        self.assertEqual(red, [("principal", "ghs_app", ["o/a"]), ("principal", "gho_usuario", ["e/w"]),
-                               ("proyectos", "gho_mario", ["o/a"])])
+        self.assertEqual(red, [("principal", "ghs_app", ["o/a"]), ("principal", "ghs_e", ["e/w"]),
+                               ("principal", "gho_usuario", ["u/x"]), ("proyectos", "gho_mario", ["o/a", "e/w"])])
         self.assertEqual(estado["errores"], [])
         self.assertNotIn("gho_mario", json.dumps(estado))  # el estado va a la salida y a la caché
 
