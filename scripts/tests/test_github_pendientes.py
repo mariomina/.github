@@ -16,6 +16,8 @@ gp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gp)
 
 AHORA = datetime(2026, 11, 14, 20, 0, tzinfo=timezone.utc)
+PLANTILLA = (RUTA.parents[1] / ".github" / "ISSUE_TEMPLATE" / "2-tarea.yml").read_text(encoding="utf-8")
+CONTRATO = ("Objetivo", "Hecho cuando", "Prueba", "Lo que ya se sabe", "Restricciones")
 
 
 def iso(delta):
@@ -40,19 +42,41 @@ def version(numero, ci="SUCCESS"):
               "mariomina-automatizacion", ci=ci)
 
 
+def issue(numero, items=1, status=None, cuerpo=""):
+    """Issue abierta en `items` Projects; con `status`, el valor de su campo Status en el primero."""
+    nodos = [{"fieldValueByName": {"name": status} if status else None}] if items else []
+    return {"number": numero, "title": f"issue {numero}", "url": "u", "body": cuerpo,
+            "projectItems": {"totalCount": items, "nodes": nodos}}
+
+
 def repo(prs=(), principal="SUCCESS", ramas=(), issues=(), merge=True, historia=None):
+    """issues: tuplas con los argumentos de issue()."""
     historia = [{"statusCheckRollup": {"state": e} if e else None} for e in (historia or [principal])]
     return {"mergeCommitAllowed": merge, "squashMergeAllowed": True, "rebaseMergeAllowed": True,
             "defaultBranchRef": {"name": "main", "target": {"history": {"nodes": historia}}},
             "pullRequests": {"nodes": list(prs)},
             "refs": {"nodes": [{"name": "main", "target": {"committedDate": iso(timedelta(days=30))}}]
                      + [{"name": n, "target": {"committedDate": iso(e)}} for n, e in ramas]},
-            "issues": {"nodes": [{"number": n, "title": f"issue {n}", "url": "u",
-                                  "projectItems": {"totalCount": t}} for n, t in issues]}}
+            "issues": {"nodes": [issue(*i) for i in issues]}}
 
 
 def acciones(estado):
     return {(p["repo"], p["numero"]): (p["clase"], p["accion"]) for p in estado["prs"]}
+
+
+def recoger(nodos, token="t", plantilla=PLANTILLA, entorno=None, metricas=None):
+    """(gp.recoger sin red, filtro_global simulado). `plantilla`: texto de 2-tarea.yml en GitHub, None si no
+    existe o la excepción al leerla; `metricas`: la excepción de consultar_metricas."""
+    lectura = "leer_remoto.side_effect" if isinstance(plantilla, Exception) else "leer_remoto.return_value"
+    filtro = mock.Mock(**{lectura: plantilla})
+    with mock.patch.object(gp, "cargar_filtro", return_value=filtro), \
+            mock.patch.object(gp, "repos", return_value=list(nodos)), \
+            mock.patch.object(gp, "consultar", return_value=(nodos, [])), \
+            mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
+            mock.patch.object(gp, "consultar_metricas", return_value={}, side_effect=metricas), \
+            mock.patch.object(gp, "freno", return_value=None), \
+            mock.patch.dict("os.environ", entorno or {}):
+        return gp.recoger(token, AHORA), filtro
 
 
 class Clasificacion(unittest.TestCase):
@@ -154,19 +178,97 @@ class Clasificacion(unittest.TestCase):
         self.assertEqual(avisos, [("o/b", "issue-sin-proyecto")])
 
     def test_recoger_trata_los_tokens_de_app_como_ciegos_a_projects(self):
-        nodos = {"o/a": repo(issues=[(5, 0)]), "e/w": repo(issues=[(7, 0)])}
-        with mock.patch.object(gp, "repos", return_value=["o/a", "e/w"]), \
-                mock.patch.object(gp, "consultar", return_value=(nodos, [])), \
-                mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
-                mock.patch.object(gp, "consultar_metricas", return_value={}), \
-                mock.patch.object(gp, "freno", return_value=None), \
-                mock.patch.dict("os.environ", {"GH_TOKEN_E": "gho_usuario"}):
-            avisos = [(a["repo"], a["tipo"]) for a in gp.recoger("ghs_app", AHORA)["avisos"]]
-        self.assertEqual(avisos, [("e/w", "issue-sin-proyecto")])
+        nodos = {"o/a": repo(issues=[(5, 0), (6, 1, "Listo")]), "e/w": repo(issues=[(7, 0), (8, 1, "Listo")])}
+        estado, _ = recoger(nodos, "ghs_app", entorno={"GH_TOKEN_E": "gho_usuario"})
+        avisos = [(a["repo"], a["tipo"]) for a in estado["avisos"]]
+        self.assertEqual(avisos, [("e/w", "issue-sin-proyecto"), ("e/w", "listo-sin-contrato")])
 
     def test_repo_sin_acceso_es_error(self):
         estado = gp.analizar({"o/a": None}, [], AHORA)
         self.assertEqual(estado["errores"], [{"repo": "o/a", "detalle": "sin acceso o no existe"}])
+
+
+def cuerpo(**secciones):
+    """Cuerpo de una issue creada con el formulario: `### Etiqueta` y su texto; sin texto, `_No response_`."""
+    textos = dict(zip(CONTRATO, ("Arreglar X", "- [ ] pasa", "salida", "#12", "Ninguna")))
+    textos.update({k.replace("_", " "): v for k, v in secciones.items()})
+    return "\n\n".join(f"### {k}\n\n{v}" for k, v in textos.items() if v is not None)
+
+
+class Contrato(unittest.TestCase):
+    """mariomina/mario-home#207: una issue en Listo tiene llenos los campos obligatorios de 2-tarea.yml."""
+
+    def test_la_plantilla_de_tarea_da_los_5_campos(self):
+        self.assertEqual(gp.contrato(PLANTILLA), CONTRATO)
+
+    def test_solo_los_obligatorios_y_nunca_el_texto_de_un_markdown(self):
+        yaml = ("body:\n  - type: markdown\n    attributes:\n      value: |\n        label: Trampa\n"
+                "        required: true\n  - type: textarea\n    attributes:\n      label: \"Resultado\"\n"
+                "    validations:\n      required: true\n  - type: textarea\n    attributes:\n      label: Contexto\n"
+                "  - type: input\n    attributes:\n      label: Checklist\n    validations:\n      required: true\n")
+        self.assertEqual(gp.contrato(yaml), ("Resultado", "Checklist"))
+
+    def test_cuerpo_completo(self):
+        self.assertEqual(gp.faltan(cuerpo(), CONTRATO), [])
+        self.assertEqual(gp.faltan(cuerpo().replace("\n", "\r\n"), CONTRATO), [])  # GitHub devuelve CRLF
+
+    def test_seccion_ausente(self):
+        self.assertEqual(gp.faltan(cuerpo(Prueba=None), CONTRATO), ["Prueba"])
+
+    def test_no_response_es_falta(self):
+        self.assertEqual(gp.faltan(cuerpo(Restricciones="_No response_"), CONTRATO), ["Restricciones"])
+
+    def test_seccion_vacia_seguida_de_otro_encabezado(self):
+        self.assertEqual(gp.faltan(cuerpo(Objetivo=""), CONTRATO), ["Objetivo"])
+
+    def test_faltan_en_el_orden_del_contrato(self):
+        texto = "### Restricciones\n\nNinguna\n\n### Objetivo\n\nX"
+        self.assertEqual(gp.faltan(texto, CONTRATO), ["Hecho cuando", "Prueba", "Lo que ya se sabe"])
+
+    def test_encabezado_de_nivel_2_sin_mayusculas_con_subseccion(self):
+        texto = cuerpo(Objetivo=None) + "\n\n## objetivo\n\n### Detalle\n\nX\n\n## Fin"
+        self.assertEqual(gp.faltan(texto, CONTRATO), [])
+        self.assertEqual(gp.faltan("## Objetivo\n\n## Otro\n\nX", ("Objetivo",)), ["Objetivo"])
+
+
+class ListoSinContrato(unittest.TestCase):
+    """Aviso de una issue en Listo a la que le falta un campo del contrato (mariomina/mario-home#207)."""
+
+    def avisos(self, issues, **kw):
+        estado = gp.analizar({"o/a": repo(issues=issues)}, [], AHORA, **kw)
+        return [a["detalle"] for a in estado["avisos"] if a["tipo"] == "listo-sin-contrato"]
+
+    def test_avisa_a_la_issue_en_listo_incompleta(self):
+        incompleta = cuerpo(Prueba=None, Restricciones="_No response_")
+        self.assertEqual(self.avisos([(8, 1, "Listo", incompleta)], contrato=CONTRATO),
+                         ["#8 issue 8 (falta: Prueba, Restricciones)"])
+
+    def test_no_avisa_a_la_completa_ni_en_otro_estado(self):
+        issues = [(1, 1, "Listo", cuerpo()), (2, 1, "En curso", ""), (3, 1, None, ""), (4, 0, None, "")]
+        self.assertEqual(self.avisos(issues, contrato=CONTRATO), [])
+
+    def test_listo_en_cualquiera_de_sus_projects(self):
+        i = issue(8, 2, "Listo", "")
+        i["projectItems"]["nodes"].insert(0, {"fieldValueByName": {"name": "Hecho"}})
+        estado = gp.analizar({"o/a": repo() | {"issues": {"nodes": [i]}}}, [], AHORA, contrato=("Objetivo",))
+        self.assertEqual([a["tipo"] for a in estado["avisos"]], ["listo-sin-contrato"])
+
+    def test_no_avisa_en_repo_sin_proyectos_ni_sin_contrato(self):
+        incompleta = [(8, 1, "Listo", "")]
+        self.assertEqual(self.avisos(incompleta, contrato=CONTRATO, sin_proyectos={"o/a"}), [])
+        self.assertEqual(self.avisos(incompleta), [])
+
+    def test_recoger_lee_el_contrato_de_la_plantilla_en_github(self):
+        estado, filtro = recoger({"o/a": repo(issues=[(8, 1, "Listo", cuerpo(Prueba=None))])})
+        filtro.leer_remoto.assert_called_once_with("mariomina/.github", ".github/ISSUE_TEMPLATE/2-tarea.yml")
+        self.assertEqual([a["detalle"] for a in estado["avisos"]], ["#8 issue 8 (falta: Prueba)"])
+        self.assertEqual(estado["errores"], [])
+
+    def test_recoger_con_la_plantilla_ilegible_deja_un_error_y_no_avisa(self):
+        for plantilla in (None, urllib.error.URLError("dns"), "body:\n  - type: markdown\n"):
+            estado, _ = recoger({"o/a": repo(issues=[(8, 1, "Listo", "")])}, plantilla=plantilla)
+            self.assertEqual(estado["avisos"], [], plantilla)
+            self.assertEqual([e["repo"] for e in estado["errores"]], ["contrato"], plantilla)
 
 
 class Repos(unittest.TestCase):
@@ -382,13 +484,7 @@ class Metricas(unittest.TestCase):
         self.assertEqual(gp.linea_metricas(None), "")
 
     def test_un_fallo_de_metricas_no_tumba_recoger(self):
-        with mock.patch.object(gp, "repos", return_value=["o/a"]), \
-                mock.patch.object(gp, "consultar", return_value=({"o/a": repo()}, [])), \
-                mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
-                mock.patch.object(gp, "consultar_metricas", side_effect=TimeoutError("lento")), \
-                mock.patch.object(gp, "freno", return_value=None), \
-                mock.patch.dict("os.environ", {}):
-            estado = gp.recoger("t", AHORA)
+        estado, _ = recoger({"o/a": repo()}, metricas=TimeoutError("lento"))
         self.assertNotIn("metricas", estado)
         self.assertEqual(estado["errores"], [{"repo": "métricas", "detalle": "TimeoutError: lento"}])
 
