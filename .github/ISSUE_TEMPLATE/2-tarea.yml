@@ -1,24 +1,45 @@
 name: Tarea
-description: Trabajo concreto que cabe en una rama y una PR.
+description: Trabajo concreto que cabe en una rama y una PR. Con sus 5 campos llenos, es una issue lista para un agente.
 type: Tarea
 projects: ["mariomina/2"]
 body:
-  - type: textarea
-    id: resultado
+  - type: markdown
     attributes:
-      label: Resultado
-      description: ¿Qué debe existir al terminar?
+      value: |
+        Los 5 campos obligatorios son el contrato de una issue lista (guía 02 de pstack, mariomina/mario-home#207). Solo una issue con los 5 pasa al estado **Listo** del Project, la cola de `autopilot-stack`. `scripts/github_pendientes.py` lee estos campos de aquí y avisa de una issue en Listo a la que le falta uno.
+  - type: textarea
+    id: objetivo
+    attributes:
+      label: Objetivo
+      description: Qué está mal o qué se quiere, y para quién. El qué, no el cómo.
     validations:
       required: true
   - type: textarea
-    id: contexto
+    id: hecho
     attributes:
-      label: Contexto
-      description: Por qué existe y de qué depende (épica, otro issue).
+      label: Hecho cuando
+      description: Comprobación que pasa o falla. «Mejorarlo» o «trabajar una hora» no son comprobaciones.
+      placeholder: "- [ ] Condición comprobable"
+    validations:
+      required: true
   - type: textarea
-    id: checklist
+    id: prueba
     attributes:
-      label: Checklist
-      placeholder: "- [ ] Paso verificable"
+      label: Prueba
+      description: La evidencia que se pide, por ejemplo la salida real de un comando, el valor guardado o una cifra antes y después.
+    validations:
+      required: true
+  - type: textarea
+    id: sabido
+    attributes:
+      label: Lo que ya se sabe
+      description: Síntoma, pasos para reproducir, línea de log, enlaces o la issue de la que depende.
+    validations:
+      required: true
+  - type: textarea
+    id: restricciones
+    attributes:
+      label: Restricciones
+      description: Las reales, por ejemplo «reproducir primero», «sin cambiar el comportamiento» o «no fusionar». Si no hay, «Ninguna».
     validations:
       required: true
