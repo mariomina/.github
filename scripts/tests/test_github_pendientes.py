@@ -124,7 +124,7 @@ class Clasificacion(unittest.TestCase):
             pr(12, "chore: release", "release-please--branches--b", "mariomina-automatizacion[bot]", ci="FAILURE"),
             pr(13, "chore: release", "release-please--branches--c", "mariomina-automatizacion", ci="PENDING"),
             pr(14, "chore: release", "release-please--branches--d", "app/mariomina-automatizacion", ci="SUCCESS"),
-            pr(15, "chore: release", "release-please--branches--e", "app/mariomina-automatizador", ci="SUCCESS"),
+            pr(15, "chore: release", "release-please--branches--e", "app/automatizador-m", ci="SUCCESS"),
         ])}
         estado = gp.analizar(nodos, [], AHORA)
         self.assertEqual(acciones(estado), {
