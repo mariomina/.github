@@ -43,7 +43,9 @@ MIN_REGLA = 40           # una regla más corta no se compara (evita falsos posi
 RE_TIPO = re.compile(r"^\s*tipo-repo:\s*([a-z-]+)\s*$", re.M)
 RE_AUTONOMIA = re.compile(r"^\s*autonomia:\s*(\S*)\s*$", re.M)  # mariomina/mario-home#19
 NIVELES = {"0", "1", "2"}
-RE_RUTA = re.compile(r"`(~/[^`]+)`")   # ruta local del repo: cualquiera bajo ~ (p. ej. ~/.hermes)
+# puntero: «- **nombre** (descripción): `ruta`»; la ruta, cualquiera bajo ~ (p. ej. ~/.hermes), es la que sigue a la
+# descripción, que puede nombrar otras rutas (mariomina/.github#48)
+RE_RUTA = re.compile(r"^\s*- \*\*[^*]+\*\*\s*(?:\((?:[^()]|\([^()]*\))*\))?:\s*`(~/[^`]+)`")
 RE_CLONE = re.compile(r"git@github\.com:([\w.-]+/[\w.-]+?)\.git")
 RE_EXCEPCION = re.compile(
     r"(excepci[oó]n|no aplica|salvo|se ignora|ignora|no rige)[^.\n]{0,80}(regla(s)? global(es)?|mario-home)",
@@ -77,7 +79,7 @@ def punteros(texto):
     """[(ruta_local, owner/repo)] de la sección 'Otros repos'; se saltan las rutas con <placeholder>."""
     salida = []
     for linea in seccion(texto, "Otros repos").splitlines():
-        ruta = RE_RUTA.search(linea)
+        ruta = RE_RUTA.match(linea)
         if not ruta or "<" in ruta.group(1):
             continue
         clone = RE_CLONE.search(linea)

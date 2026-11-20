@@ -124,6 +124,24 @@ class FiltroGlobal(unittest.TestCase):
         self.assertEqual([x["repo"] for x in r["repos"]], ["o/agencia", "o/cliente-x"])
         self.assertIn(("o/cliente-x", "duplicado-de-global"), self.reglas(r))
 
+    def test_puntero_con_otra_ruta_en_la_descripcion(self):
+        """mariomina/.github#48: la ruta del repo es la que sigue a la descripción, no la primera entre comillas."""
+        claude = ("- **mario-claude** (infraestructura de Claude Code, CLI y app: versión de configuración y métricas "
+                  "de uso; nunca es `~/.claude`): `~/Documentos/Mario/mario-claude`. Si falta: `git clone "
+                  "git@github.com:mariomina/mario-claude.git ~/Documentos/Mario/mario-claude`.\n")
+        hermes = ("- **mario-hermes** (agente Hermes: su perfil por defecto como distribución; Hermes exige "
+                  "`~/.hermes`, y `~/Documentos/Mario/mario-hermes` es un symlink a esa carpeta): `~/.hermes`. "
+                  "Si falta (Hermes recién instalado): `git -C ~/.hermes init && git -C ~/.hermes remote add origin "
+                  "git@github.com:mariomina/mario-hermes.git`.\n")
+        self.assertEqual(filtro.punteros(home_md([]) + claude + hermes),
+                         [(str(self.proy / "mario-claude"), "mariomina/mario-claude"),
+                          (str(self.casa / ".hermes"), "mariomina/mario-hermes")])
+        self.repo("mario-home", home_md([]) + claude)
+        self.repo("mario-claude", "# c\n\ntipo-repo: agente\nautonomia: 0\n")
+        r = self.correr()
+        self.assertTrue(r["valido"], r["violaciones"])
+        self.assertEqual(r["avisos"], [])
+
     def test_puntero_con_placeholder_se_salta(self):
         self.repo("mario-home", home_md(["a"]) + "- **cliente**: `~/Documentos/Mario/cliente-<slug>`.\n")
         self.repo("a", "# a\n\ntipo-repo: web\nautonomia: 0\n")
