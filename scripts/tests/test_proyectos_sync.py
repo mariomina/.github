@@ -3,6 +3,7 @@ import datetime as dt
 import importlib.util
 import io
 import os
+import re
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -49,9 +50,9 @@ PROYECTO = {"id": "PRJ", "number": 2, "title": "Sistema",
 class GraphQLFalso:
     """Responde por consulta; `prs` es una lista de páginas para probar el corte de la paginación."""
 
-    def __init__(self, items, abiertas=(), cerradas=(), prs=((),)):
+    def __init__(self, items, abiertas=(), cerradas=(), prs=((),), rojos=()):
         self.items, self.abiertas, self.cerradas, self.prs = items, list(abiertas), list(cerradas), prs
-        self.llamadas = []
+        self.rojos, self.llamadas = set(rojos), []
 
     def __call__(self, query, **v):
         self.llamadas.append((query, v))
@@ -67,6 +68,12 @@ class GraphQLFalso:
             n = int(v["after"] or 0)
             siguiente = str(n + 1) if n + 1 < len(self.prs) else None
             return {"repository": {"pullRequests": pagina(list(self.prs[n]), siguiente)}}
+        if "defaultBranchRef" in query:
+            repos = re.findall(r'(r\d+): repository\(owner:"([^"]+)", name:"([^"]+)"\)', query)
+            return {a: {"nameWithOwner": f"{o}/{n}", "defaultBranchRef": {"target": {"history": {"nodes": [
+                {"statusCheckRollup": None},
+                {"statusCheckRollup": {"state": "FAILURE" if f"{o}/{n}" in self.rojos else "SUCCESS"}}]}}}}
+                for a, o, n in repos}
         if "addProjectV2ItemById" in query:
             return {"addProjectV2ItemById": {"item": {"id": "N" + v["c"]}}}
         return {}
@@ -157,6 +164,94 @@ class AltaDeCerradasYPR(unittest.TestCase):
         self.assertIn("+3 añadidos · 1 → Backlog · 2 → Hecho", salida)
         for ref in ("dueno/repo#4", "dueno/repo#5", "dueno/repo#6"):
             self.assertIn(ref, salida)
+
+
+OPCIONES = [{"id": "o0", "name": "P0"}, {"id": "o1", "name": "P1"}, {"id": "o2", "name": "P2"}]
+CON_PRIORIDAD = {**PROYECTO, "shortDescription": "Sistema · Paso actual: Paso 4",
+                 "fields": {"nodes": [{}, {"id": "PRI", "name": "Prioridad", "options": OPCIONES}]}}
+
+
+def tarea(n, titulo="Tarea", tipo="Tarea", **kw):
+    return {**issue(n), "title": titulo, "createdAt": hace(n), "issueType": {"name": tipo},
+            "repository": {"nameWithOwner": "dueno/repo"}, **kw}
+
+
+def con(it, prioridad=None, paso=None):
+    """Item con los campos Prioridad y Paso del Project."""
+    return {**it, "prioridad": {"name": prioridad} if prioridad else None, "paso": {"name": paso} if paso else None}
+
+
+class Prioridad(unittest.TestCase):
+    """Paso 5 del sync: la prioridad calculada a lo que no la tiene (mariomina/mario-home#239)."""
+
+    def sincronizar(self, falso, dry=False, actions=""):
+        with mock.patch.object(ps, "gql", falso), mock.patch.dict(os.environ, {"GITHUB_ACTIONS": actions}):
+            return ps.sincronizar(CON_PRIORIDAD, dry)
+
+    def puestas(self, falso):
+        return {v["i"]: v["o"] for v in falso.mutaciones("updateProjectV2ItemFieldValue") if v["f"] == "PRI"}
+
+    def test_issue_creada_en_la_web_sin_prioridad_recibe_la_calculada(self):
+        bug = tarea(1, "Algo roto", tipo="Bug")
+        falso = GraphQLFalso([con(item("w", bug, hace(0), status="back"))], abiertas=[bug])
+        salida = self.sincronizar(falso)
+        self.assertEqual(self.puestas(falso), {"w": "o1"})
+        self.assertIn("1 → Prioridad", salida)
+
+    def test_issue_nueva_del_repo_la_recibe_en_el_mismo_pase(self):
+        falso = GraphQLFalso([], abiertas=[tarea(2, "Nota")])
+        self.sincronizar(falso)
+        self.assertEqual(self.puestas(falso), {"NI2": "o2"})
+
+    def test_no_toca_la_prioridad_puesta_ni_lo_cerrado(self):
+        puesta = tarea(3, "FRENO: parar")  # calcularía P0
+        cerrada = {**tarea(4), "state": "CLOSED", "closedAt": hace(1)}
+        falso = GraphQLFalso([con(item("a", puesta, hace(0), status="back"), prioridad="P2"),
+                              con(item("b", cerrada, hace(1), status="hecho"))], abiertas=[puesta])
+        self.assertIn("0 → Prioridad", self.sincronizar(falso))
+        self.assertEqual(self.puestas(falso), {})
+        self.assertEqual(falso.consultas(ps.ITEMS)[0]["id"], "PRJ")
+        self.assertFalse([q for q, _ in falso.llamadas if "defaultBranchRef" in q])  # nada que calcular: sin consulta
+
+    def test_paso_actual_de_la_descripcion_y_lo_que_lo_bloquea(self):
+        del_paso = tarea(5, "Cola de agentes")
+        bloqueante = tarea(6, "Forma de delegate_task", blocking={"nodes": [{"id": "I5", "state": "OPEN"}]})
+        falso = GraphQLFalso([con(item("a", del_paso, hace(0), status="back"), paso="Paso 4"),
+                              con(item("b", bloqueante, hace(0), status="back"))], abiertas=[del_paso, bloqueante])
+        self.sincronizar(falso)
+        self.assertEqual(self.puestas(falso), {"a": "o1", "b": "o1"})
+
+    def test_ci_rojo_en_una_sola_consulta(self):
+        de_ci = tarea(7, "fix(ci): main en rojo")
+        otra = tarea(8, "Nota")
+        falso = GraphQLFalso([con(item("a", de_ci, hace(0), status="back")), con(item("b", otra, hace(0), status="back"))],
+                             abiertas=[de_ci, otra], rojos={"dueno/repo"})
+        self.sincronizar(falso)
+        self.assertEqual(self.puestas(falso), {"a": "o0", "b": "o2"})
+        self.assertEqual(len([q for q, _ in falso.llamadas if "defaultBranchRef" in q]), 1)
+
+    def test_simulacion_lista_en_local_y_solo_cuenta_en_actions(self):
+        nota = tarea(9, "Nota")
+        falso = GraphQLFalso([con(item("a", nota, hace(0), status="back"))], abiertas=[nota])
+        self.assertIn("= dueno/repo#9 → P2 (el resto)", self.sincronizar(falso, dry=True))
+        self.assertEqual(self.puestas(falso), {})
+        salida = self.sincronizar(GraphQLFalso([con(item("a", nota, hace(0), status="back"))], abiertas=[nota]),
+                                  dry=True, actions="true")
+        self.assertIn("1 → Prioridad", salida)
+        self.assertNotIn("repo#9", salida)
+
+    def test_proyecto_sin_las_tres_opciones_no_se_toca(self):
+        nota = tarea(9, "Nota")
+        falso = GraphQLFalso([con(item("a", nota, hace(0), status="back"))], abiertas=[nota])
+        with mock.patch.object(ps, "gql", falso), mock.patch.dict(os.environ, {"GITHUB_ACTIONS": ""}):
+            ps.sincronizar({**CON_PRIORIDAD, "fields": {"nodes": [{"id": "PRI", "name": "Prioridad",
+                                                                    "options": OPCIONES[:2]}]}}, False)
+        self.assertEqual(self.puestas(falso), {})
+
+    def test_las_consultas_piden_los_campos_de_la_regla(self):
+        for campo in ("blocking", "issueType", "reactions", 'fieldValueByName(name: "Paso")', "shortDescription"):
+            self.assertIn(campo, ps.ITEMS + ps.ABIERTAS + ps.PROYECTOS)
+        self.assertNotIn("blocking", ps.PRS)  # una PR no tiene «bloqueado por»
 
 
 class Principal(unittest.TestCase):
