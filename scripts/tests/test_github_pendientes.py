@@ -16,6 +16,8 @@ gp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gp)
 
 AHORA = datetime(2026, 11, 14, 20, 0, tzinfo=timezone.utc)
+PLANTILLA = (RUTA.parents[1] / ".github" / "ISSUE_TEMPLATE" / "2-tarea.yml").read_text(encoding="utf-8")
+CONTRATO = ("Objetivo", "Hecho cuando", "Prueba", "Lo que ya se sabe", "Restricciones")
 
 
 def iso(delta):
@@ -167,6 +169,49 @@ class Clasificacion(unittest.TestCase):
     def test_repo_sin_acceso_es_error(self):
         estado = gp.analizar({"o/a": None}, [], AHORA)
         self.assertEqual(estado["errores"], [{"repo": "o/a", "detalle": "sin acceso o no existe"}])
+
+
+def cuerpo(**secciones):
+    """Cuerpo de una issue creada con el formulario: `### Etiqueta` y su texto; sin texto, `_No response_`."""
+    textos = dict(zip(CONTRATO, ("Arreglar X", "- [ ] pasa", "salida", "#12", "Ninguna")))
+    textos.update({k.replace("_", " "): v for k, v in secciones.items()})
+    return "\n\n".join(f"### {k}\n\n{v}" for k, v in textos.items() if v is not None)
+
+
+class Contrato(unittest.TestCase):
+    """mariomina/mario-home#207: una issue en Listo tiene llenos los campos obligatorios de 2-tarea.yml."""
+
+    def test_la_plantilla_de_tarea_da_los_5_campos(self):
+        self.assertEqual(gp.contrato(PLANTILLA), CONTRATO)
+
+    def test_solo_los_obligatorios_y_nunca_el_texto_de_un_markdown(self):
+        yaml = ("body:\n  - type: markdown\n    attributes:\n      value: |\n        label: Trampa\n"
+                "        required: true\n  - type: textarea\n    attributes:\n      label: \"Resultado\"\n"
+                "    validations:\n      required: true\n  - type: textarea\n    attributes:\n      label: Contexto\n"
+                "  - type: input\n    attributes:\n      label: Checklist\n    validations:\n      required: true\n")
+        self.assertEqual(gp.contrato(yaml), ("Resultado", "Checklist"))
+
+    def test_cuerpo_completo(self):
+        self.assertEqual(gp.faltan(cuerpo(), CONTRATO), [])
+        self.assertEqual(gp.faltan(cuerpo().replace("\n", "\r\n"), CONTRATO), [])  # GitHub devuelve CRLF
+
+    def test_seccion_ausente(self):
+        self.assertEqual(gp.faltan(cuerpo(Prueba=None), CONTRATO), ["Prueba"])
+
+    def test_no_response_es_falta(self):
+        self.assertEqual(gp.faltan(cuerpo(Restricciones="_No response_"), CONTRATO), ["Restricciones"])
+
+    def test_seccion_vacia_seguida_de_otro_encabezado(self):
+        self.assertEqual(gp.faltan(cuerpo(Objetivo=""), CONTRATO), ["Objetivo"])
+
+    def test_faltan_en_el_orden_del_contrato(self):
+        texto = "### Restricciones\n\nNinguna\n\n### Objetivo\n\nX"
+        self.assertEqual(gp.faltan(texto, CONTRATO), ["Hecho cuando", "Prueba", "Lo que ya se sabe"])
+
+    def test_encabezado_de_nivel_2_sin_mayusculas_con_subseccion(self):
+        texto = cuerpo(Objetivo=None) + "\n\n## objetivo\n\n### Detalle\n\nX\n\n## Fin"
+        self.assertEqual(gp.faltan(texto, CONTRATO), [])
+        self.assertEqual(gp.faltan("## Objetivo\n\n## Otro\n\nX", ("Objetivo",)), ["Objetivo"])
 
 
 class Repos(unittest.TestCase):

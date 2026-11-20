@@ -89,6 +89,10 @@ SALTADO = {"SKIPPED", "NEUTRAL"}
 RE_SALTO = re.compile(r"\bfrom (\S+) to (\S+)", re.I)
 RE_VERSION = re.compile(r"v?(\d+(?:\.\d+)*)")
 RE_REVERT = re.compile(r'^(revert(\(.+\))?!?:|Revert ")', re.I)
+RE_ELEMENTO = re.compile(r"^\s*-\s+type:\s*(\S+)")              # elemento del `body` de un formulario de issue
+RE_ATRIBUTO = re.compile(r"^\s*(label|required):\s*(.*?)\s*$")
+RE_ENCABEZADO = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*$")
+SIN_RESPUESTA = "_No response_"  # lo que GitHub escribe en un campo vacío de un formulario de issue
 BOTS = {"github-actions", "mariomina-automatizacion", "dependabot"}
 VENTANAS = (7, 28)  # días
 HISTORIA = """history(since: "DESDE", first: 100CURSOR) { pageInfo { hasNextPage endCursor }
@@ -303,6 +307,37 @@ def clasificar_pr(repo, pr, ahora):
     else:
         e.update(clase="trabajo", accion="decision", motivo="PR de trabajo")
     return e
+
+
+def contrato(texto):
+    """Etiquetas de los campos obligatorios del YAML de un formulario de issue, en su orden. Parser de líneas
+    mínimo: por cada `- type:` del body, su primer `label:` y si tiene `required: true`; sin `type: markdown`."""
+    elementos = []
+    for fila in texto.splitlines():
+        if m := RE_ELEMENTO.match(fila):
+            elementos.append({"type": m.group(1).strip("\"'")})
+        elif elementos and (m := RE_ATRIBUTO.match(fila)):
+            elementos[-1].setdefault(m.group(1), m.group(2).strip("\"'"))
+    return tuple(e["label"] for e in elementos
+                 if e["type"] != "markdown" and e.get("label") and e.get("required", "").lower() == "true")
+
+
+def faltan(cuerpo, etiquetas):
+    """Etiquetas sin sección con texto en `cuerpo`, en el orden de `etiquetas`. Sección: `## <etiqueta>` o
+    `### <etiqueta>` (sin distinguir mayúsculas) hasta el siguiente encabezado de su nivel o mayor; vacía o
+    `_No response_` cuenta como falta."""
+    filas = cuerpo.splitlines()
+    encabezados = [(i, len(m.group(1)), m.group(2).casefold())
+                   for i, fila in enumerate(filas) if (m := RE_ENCABEZADO.match(fila))]
+    llenas = set()
+    for j, (i, nivel, titulo) in enumerate(encabezados):
+        if nivel not in (2, 3):
+            continue
+        fin = next((k for k, n, _ in encabezados[j + 1:] if n <= nivel), len(filas))
+        texto = "\n".join(filas[i + 1:fin]).strip()
+        if texto and texto != SIN_RESPUESTA:
+            llenas.add(titulo)
+    return [e for e in etiquetas if e.strip().casefold() not in llenas]
 
 
 def analizar(nodos, errores, ahora, sin_proyectos=()):
