@@ -32,7 +32,9 @@ Repos: mario-home y los punteros de su AGENTS.md, en cascada por los home repos 
 filtro_global.py). Cada AGENTS.md se lee por la API (rama principal): un clon local puede estar atrasado.
 
 Uso (token: GH_TOKEN, GITHUB_TOKEN o `gh auth token`; GH_TOKEN_<DUEÑO>, p. ej. GH_TOKEN_ESCALA_AGENCIA, manda
-en los repos de ese dueño: un token de GitHub App vale para una sola cuenta):
+en los repos de ese dueño: un token de GitHub App vale para una sola cuenta. Un token de App, ghs_, no ve los
+Projects de una cuenta personal: para leerlos, y solo para eso, PROJECTS_TOKEN o la sesión de `gh` de Mario,
+`gh auth token` sin GH_TOKEN ni GITHUB_TOKEN; mariomina/.github#65 y mariomina/mario-home#38):
   github_pendientes.py              tabla
   github_pendientes.py --json       todo en JSON
   github_pendientes.py --fusionar   fusiona lo que se fusiona solo, después la tabla; salida 1 si alguna falla
@@ -119,6 +121,7 @@ FRAGMENTO = """fragment R on Repository {
     nodes { name target { ... on Commit { committedDate } } } }
   ISSUES
 }""".replace("ROLLUP", ROLLUP).replace("ISSUES", ISSUES)
+FRAGMENTO_PROYECTOS = f"fragment P on Repository {{ {ISSUES} }}"  # con el token que ve los Projects (#65)
 
 
 class Fallo(Exception):
@@ -156,6 +159,18 @@ def gh_auth_token(entorno=None):
     return p.stdout.strip() or None
 
 
+def token_proyectos(token):
+    """Un token que ve los Projects de una cuenta personal, o None. `token` si no es de una GitHub App (ghs_);
+    si lo es, PROJECTS_TOKEN (Actions) o la sesión de `gh` de Mario en la máquina, la misma excepción que hace
+    mario-home/entorno/agente/gh con `gh project`. Solo para leer Projects (mariomina/mario-home#38)."""
+    if not token.startswith("ghs_"):
+        return token
+    # Sin GH_TOKEN ni GITHUB_TOKEN: con ellos, `gh auth token` devuelve ese mismo token de App.
+    otro = os.environ.get("PROJECTS_TOKEN") or gh_auth_token(
+        {k: v for k, v in os.environ.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")})
+    return otro if otro and not otro.startswith("ghs_") else None
+
+
 def token_de(repo, token):
     """GH_TOKEN_<DUEÑO> para `owner/repo` si existe; si no, `token`. Mismo criterio que filtro_global.token."""
     dueno = re.sub(r"\W", "_", repo.split("/")[0]).upper()
@@ -188,17 +203,18 @@ def repos(filtro):
     return salida
 
 
-def consultar(nombres, token):
-    """{owner/repo: nodo GraphQL o None} y [errores por repo], en una consulta con alias por token."""
+def consultar(nombres, token, fragmento=FRAGMENTO, por_dueno=True):
+    """{owner/repo: nodo GraphQL o None} y [errores por repo], en una consulta con alias por token: el del dueño
+    de cada repo (token_de) o, sin `por_dueno`, solo `token`."""
     alias = {f"r{i}": n for i, n in enumerate(nombres)}
     grupos = {}
     for a, n in alias.items():
-        grupos.setdefault(token_de(n, token), []).append(a)
+        grupos.setdefault(token_de(n, token) if por_dueno else token, []).append(a)
     datos, errores = {}, []
     for t, nombres_alias in grupos.items():
         campos = " ".join(f'{a}: repository(owner: "{alias[a].split("/")[0]}", name: "{alias[a].split("/")[1]}") '
-                          "{ ...R }" for a in nombres_alias)
-        d = http("POST", f"{API}/graphql", t, {"query": f"query {{ {campos} }}\n{FRAGMENTO}"})
+                          f"{{ ...{fragmento.split()[1]} }}" for a in nombres_alias)
+        d = http("POST", f"{API}/graphql", t, {"query": f"query {{ {campos} }}\n{fragmento}"})
         datos.update(d.get("data") or {})
         for e in d.get("errors") or []:
             repo = alias.get((e.get("path") or [""])[0], "?")
@@ -206,6 +222,12 @@ def consultar(nombres, token):
     if not datos and errores:
         raise Fallo(errores[0]["detalle"])
     return {n: datos.get(a) for a, n in alias.items()}, errores
+
+
+def consultar_proyectos(nombres, token):
+    """Como consultar, solo las issues con sus Projects y con un solo token, el de token_proyectos. Solo lee:
+    la identidad de Mario no escribe nada (mariomina/mario-home#38)."""
+    return consultar(nombres, token, FRAGMENTO_PROYECTOS, por_dueno=False)
 
 
 # --- clasificación (sin red) -----------------------------------------------------
@@ -419,7 +441,24 @@ def recoger(token, ahora=None):
     nombres = repos(filtro)
     nodos, errores = consultar(nombres, token)
     # Un token de instalación de GitHub App (ghs_) no ve los Projects de una cuenta personal: totalCount sería 0.
+    # Las issues de esos repos se leen con un token que los ve (#65); sin él, o si esa consulta falla, siguen
+    # ciegos (sin avisos de Projects, que serían falsos) y el motivo va a `errores`. El resto, con `token`.
     ciegos = {n for n in nombres if token_de(n, token).startswith("ghs_")}
+    if ciegos:
+        tp = token_proyectos(token)
+        if not tp:
+            errores.append({"repo": "proyectos", "detalle": "sin token que vea los Projects (PROJECTS_TOKEN o "
+                            "`gh auth token`): sin avisos issue-sin-proyecto ni listo-sin-contrato"})
+        else:
+            try:  # nunca tumba el barrido
+                vistos, fallos = consultar_proyectos([n for n in nombres if n in ciegos], tp)
+                errores += fallos
+                for n, v in vistos.items():
+                    if v and nodos.get(n):
+                        nodos[n]["issues"] = v["issues"]
+                        ciegos.discard(n)
+            except (Fallo, OSError, ValueError, KeyError) as e:
+                errores.append({"repo": "proyectos", "detalle": f"{type(e).__name__}: {e}"[:160]})
     try:  # por la API: el barrido de mario-home solo tiene este script y filtro_global.py; nunca lo tumba
         plantilla = filtro.leer_remoto(*PLANTILLA_TAREA)
         motivo = "no existe" if plantilla is None else "sin campos obligatorios"
