@@ -64,14 +64,29 @@ def acciones(estado):
     return {(p["repo"], p["numero"]): (p["clase"], p["accion"]) for p in estado["prs"]}
 
 
-def recoger(nodos, token="t", plantilla=PLANTILLA, entorno=None, metricas=None):
+def recoger(nodos, token="t", plantilla=PLANTILLA, entorno=None, metricas=None, tp=None, proyectos=None, red=None):
     """(gp.recoger sin red, filtro_global simulado). `plantilla`: texto de 2-tarea.yml en GitHub, None si no
-    existe o la excepción al leerla; `metricas`: la excepción de consultar_metricas."""
+    existe o la excepción al leerla; `metricas`: la excepción de consultar_metricas; `tp`: el token que ve los
+    Projects (token_proyectos); `proyectos`: {repo: issues como en repo()} que ve `tp`, o la excepción de esa
+    consulta; `red`: lista donde se anota (consulta, token, repos) de cada consulta GraphQL."""
+    red = [] if red is None else red
+
+    def http(metodo, url, token, cuerpo=None):
+        campos = re.findall(r'(\w+): repository\(owner: "([^"]+)", name: "([^"]+)"\)', cuerpo["query"])
+        tipo = "principal" if "pullRequests" in cuerpo["query"] else "proyectos"
+        red.append((tipo, token, [f"{o}/{n}" for _, o, n in campos]))
+        if tipo == "proyectos" and isinstance(proyectos, Exception):
+            raise proyectos
+        vistos = nodos if tipo == "principal" else {r: {"issues": repo(issues=i)["issues"]}
+                                                    for r, i in (proyectos or {}).items()}
+        return {"data": {a: vistos.get(f"{o}/{n}") for a, o, n in campos}}
+
     lectura = "leer_remoto.side_effect" if isinstance(plantilla, Exception) else "leer_remoto.return_value"
     filtro = mock.Mock(**{lectura: plantilla})
     with mock.patch.object(gp, "cargar_filtro", return_value=filtro), \
             mock.patch.object(gp, "repos", return_value=list(nodos)), \
-            mock.patch.object(gp, "consultar", return_value=(nodos, [])), \
+            mock.patch.object(gp, "http", http), \
+            mock.patch.object(gp, "token_proyectos", return_value=tp), \
             mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
             mock.patch.object(gp, "consultar_metricas", return_value={}, side_effect=metricas), \
             mock.patch.object(gp, "freno", return_value=None), \
@@ -177,11 +192,16 @@ class Clasificacion(unittest.TestCase):
         avisos = [(a["repo"], a["tipo"]) for a in gp.analizar(nodos, [], AHORA, sin_proyectos={"o/a"})["avisos"]]
         self.assertEqual(avisos, [("o/b", "issue-sin-proyecto")])
 
-    def test_recoger_trata_los_tokens_de_app_como_ciegos_a_projects(self):
+    def test_recoger_sin_token_que_vea_los_projects_deja_ciegos_los_de_app_y_lo_dice(self):
         nodos = {"o/a": repo(issues=[(5, 0), (6, 1, "Listo")]), "e/w": repo(issues=[(7, 0), (8, 1, "Listo")])}
-        estado, _ = recoger(nodos, "ghs_app", entorno={"GH_TOKEN_E": "gho_usuario"})
+        red = []
+        estado, _ = recoger(nodos, "ghs_app", entorno={"GH_TOKEN_E": "gho_usuario"}, tp=None, red=red)
         avisos = [(a["repo"], a["tipo"]) for a in estado["avisos"]]
         self.assertEqual(avisos, [("e/w", "issue-sin-proyecto"), ("e/w", "listo-sin-contrato")])
+        self.assertEqual(estado["errores"], [{"repo": "proyectos", "detalle": "sin token que vea los Projects "
+                                              "(PROJECTS_TOKEN o `gh auth token`): sin avisos issue-sin-proyecto "
+                                              "ni listo-sin-contrato"}])
+        self.assertEqual([consulta for consulta, _, _ in red], ["principal", "principal"])
 
     def test_repo_sin_acceso_es_error(self):
         estado = gp.analizar({"o/a": None}, [], AHORA)
@@ -379,6 +399,76 @@ class Consulta(unittest.TestCase):
         with mock.patch.object(gp, "http", return_value={"errors": [{"message": "Bad credentials"}]}), \
                 self.assertRaises(gp.Fallo):
             gp.consultar(["o/a"], "t")
+
+
+class Proyectos(unittest.TestCase):
+    """mariomina/.github#65: un token de App (ghs_) no ve los Projects de una cuenta personal; las issues de esos
+    repos se leen con un token que sí los ve, solo para leer (mariomina/mario-home#38)."""
+
+    def token(self, token, entorno, gh="/usr/bin/gh", salida="gho_mario\n"):
+        """(token_proyectos(token), llamadas a subprocess.run) con solo `entorno` en os.environ. `salida`: la de
+        `gh auth token`, o la excepción al lanzarlo; `gh`: la ruta de `gh`, None si no está instalado."""
+        error = salida if isinstance(salida, Exception) else None
+        with mock.patch.dict("os.environ", entorno, clear=True), \
+                mock.patch.object(gp.shutil, "which", return_value=gh), \
+                mock.patch.object(gp.os.path, "exists", return_value=False), \
+                mock.patch.object(gp.subprocess, "run", return_value=mock.Mock(stdout=salida), side_effect=error) as run:
+            return gp.token_proyectos(token), run.call_args_list
+
+    def test_un_token_que_no_es_de_app_sirve_tal_cual(self):
+        self.assertEqual(self.token("gho_x", {"PROJECTS_TOKEN": "gho_p"}), ("gho_x", []))
+
+    def test_con_token_de_app_usa_projects_token(self):
+        self.assertEqual(self.token("ghs_app", {"GH_TOKEN": "ghs_app", "PROJECTS_TOKEN": "gho_p"}), ("gho_p", []))
+
+    def test_sin_projects_token_pide_la_sesion_de_gh_sin_los_tokens_del_entorno(self):
+        # Con GH_TOKEN o GITHUB_TOKEN puestos, `gh auth token` devolvería ese mismo token de App.
+        entorno = {"GH_TOKEN": "ghs_app", "GITHUB_TOKEN": "ghs_otro", "HOME": "/home/m", "PROJECTS_TOKEN": ""}
+        token, llamadas = self.token("ghs_app", entorno)
+        self.assertEqual(token, "gho_mario")
+        self.assertEqual([c.args[0] for c in llamadas], [["/usr/bin/gh", "auth", "token"]])
+        self.assertEqual(llamadas[0].kwargs["env"], {"HOME": "/home/m", "PROJECTS_TOKEN": ""})
+
+    def test_sin_token_que_vea_los_projects_devuelve_none(self):
+        casos = {"gh da otro token de App": ({}, {"salida": "ghs_otro\n"}),
+                 "gh sin sesión": ({}, {"salida": ""}),
+                 "gh no instalado": ({}, {"gh": None}),
+                 "gh no arranca": ({}, {"salida": FileNotFoundError("gh")}),
+                 "PROJECTS_TOKEN de App": ({"PROJECTS_TOKEN": "ghs_x"}, {})}
+        for caso, (entorno, kw) in casos.items():
+            self.assertIsNone(self.token("ghs_app", entorno, **kw)[0], caso)
+
+    def test_recoger_con_token_de_app_lee_los_projects_con_el_token_que_los_ve(self):
+        # Con un token de App (o/a y e/w, cada dueño con el suyo), la consulta principal ve totalCount 0.
+        nodos = {"o/a": repo(principal="FAILURE", issues=[(5, 0), (6, 0), (7, 0)]), "e/w": repo(issues=[(8, 0)]),
+                 "u/x": repo(issues=[(9, 1)])}
+        red = []
+        estado, _ = recoger(nodos, "ghs_app", entorno={"GH_TOKEN_E": "ghs_e", "GH_TOKEN_U": "gho_usuario"},
+                            tp="gho_mario", red=red,
+                            proyectos={"o/a": [(5, 0), (6, 1, "En curso"), (7, 1, "Listo", cuerpo(Prueba=None))],
+                                       "e/w": [(8, 1)]})
+        avisos = [(a["repo"], a["tipo"], a["detalle"]) for a in estado["avisos"]]
+        self.assertEqual(avisos, [("o/a", "ci-rojo", "CI rojo en main"), ("o/a", "issue-sin-proyecto", "#5 issue 5"),
+                                  ("o/a", "listo-sin-contrato", "#7 issue 7 (falta: Prueba)")])
+        self.assertEqual(red, [("principal", "ghs_app", ["o/a"]), ("principal", "ghs_e", ["e/w"]),
+                               ("principal", "gho_usuario", ["u/x"]), ("proyectos", "gho_mario", ["o/a", "e/w"])])
+        self.assertEqual(estado["errores"], [])
+        self.assertNotIn("gho_mario", json.dumps(estado))  # el estado va a la salida y a la caché
+
+    def test_un_fallo_de_la_consulta_de_proyectos_no_tumba_el_barrido(self):
+        nodos = {"o/a": repo(principal="FAILURE", issues=[(5, 0)])}
+        estado, _ = recoger(nodos, "ghs_app", tp="gho_mario", proyectos=urllib.error.URLError("dns"))
+        self.assertEqual([a["tipo"] for a in estado["avisos"]], ["ci-rojo"])
+        self.assertEqual(estado["errores"], [{"repo": "proyectos", "detalle": "URLError: <urlopen error dns>"}])
+        self.assertIn("metricas", estado)
+        self.assertNotIn("gho_mario", json.dumps(estado))
+
+    def test_la_consulta_de_proyectos_pide_las_issues_con_sus_projects(self):
+        for consulta in (gp.FRAGMENTO, gp.FRAGMENTO_PROYECTOS):
+            self.assertIn('projectItems(first: 10) { totalCount', consulta)
+            self.assertIn('fieldValueByName(name: "Status")', consulta)
+            self.assertNotIn("ISSUES", consulta)
+        self.assertNotIn("pullRequests", gp.FRAGMENTO_PROYECTOS)  # solo lo que la App no ve
 
 
 class Linea(unittest.TestCase):
