@@ -3,7 +3,7 @@
 Decisiones de Mario (mariomina/mario-2-cerebro#280):
   - PR de versión (release-please): se fusiona sola, solo con CI en verde (mariomina/.github#28): la ejecución
     más reciente de cada check del head, como `gh pr checks` (mariomina/mario-home#134). La crea y la fusiona
-    el job reutilizable con el token de la GitHub App mariomina-automatizacion (el CI corre en la PR y el merge
+    el job reutilizable con el token de la GitHub App automatizador-m (antes mariomina-automatizacion; el CI corre en la PR y el merge
     dispara la versión); si su CI acaba después, la fusiona `--fusionar`. CI rojo o sin CI tras 10 min: espera
     la decisión de Mario.
   - Dependabot: espera el veredicto de un verificador y el permiso de Mario, como una PR de trabajo (pstack:
@@ -95,7 +95,8 @@ METODOS = ("squash", "merge", "rebase")  # en este orden, los que el repo permit
 ESPERA_CI = timedelta(minutes=10)        # `--fusionar-version` espera al CI de la PR hasta este plazo
 SIN_CI = timedelta(minutes=2)            # sin ningún check tras este tiempo: la PR no tiene CI
 SONDEO = 15                              # segundos entre lecturas del CI
-AUTORES_VERSION = {"github-actions", "mariomina-automatizacion"}  # GITHUB_TOKEN o la GitHub App (#28)
+# GITHUB_TOKEN o la GitHub App `automatizador-m` (#28), también con su nombre anterior (mariomina/mario-home#238)
+AUTORES_VERSION = {"github-actions", "automatizador-m", "mariomina-automatizacion"}
 # Checks del head con su fecha: GraphQL no quita los duplicados de un mismo head (`edited`, `reopened`, re-runs).
 ROLLUP = """statusCheckRollup { state contexts(first: 100) { totalCount nodes { __typename
       ... on CheckRun { name status conclusion startedAt checkSuite { workflowRun { event workflow { name } } } }
@@ -116,7 +117,7 @@ RE_ENCABEZADO = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*$")
 SIN_RESPUESTA = "_No response_"  # lo que GitHub escribe en un campo vacío de un formulario de issue
 LISTO = "Listo"  # Status del Project para una issue lista para un agente (cola de autopilot-stack)
 PLANTILLA_TAREA = ("mariomina/.github", ".github/ISSUE_TEMPLATE/2-tarea.yml")  # sus campos obligatorios: el contrato
-BOTS = {"github-actions", "mariomina-automatizacion", "dependabot"}
+BOTS = {"github-actions", "automatizador-m", "mariomina-automatizacion", "dependabot"}
 VENTANAS = (7, 28)  # días
 HISTORIA = """history(since: "DESDE", first: 100CURSOR) { pageInfo { hasNextPage endCursor }
     nodes { committedDate statusCheckRollup { state } } }"""
