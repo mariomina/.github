@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/mariomina/.github/compare/v1.15.0...v1.16.0) (2026-11-20)
+
+
+### Novedades
+
+* **scripts:** prioridad() calcula la prioridad con las reglas de Tan ([#71](https://github.com/mariomina/.github/issues/71)) ([999f9d2](https://github.com/mariomina/.github/commit/999f9d24a6608ed5161d8cb92f08f9922077bc7a))
+
 ## [1.15.0](https://github.com/mariomina/.github/compare/v1.14.0...v1.15.0) (2026-11-20)
 
 
