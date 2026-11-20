@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.14.0](https://github.com/mariomina/.github/compare/v1.13.1...v1.14.0) (2026-11-20)
+
+
+### Novedades
+
+* contrato de issue lista y aviso listo-sin-contrato ([#62](https://github.com/mariomina/.github/issues/62)) ([619a227](https://github.com/mariomina/.github/commit/619a227bf3311c7e0c4b737b187412cd15dd78cb))
+
+
+### Correcciones
+
+* **filtro:** la ruta del puntero es la que sigue a su descripción ([9842f3a](https://github.com/mariomina/.github/commit/9842f3a8d5c843d04735ff51bb601572726f170d)), closes [#48](https://github.com/mariomina/.github/issues/48)
+* **filtro:** RE_RUTA toma la ruta que sigue a la descripción del puntero ([#61](https://github.com/mariomina/.github/issues/61)) ([9842f3a](https://github.com/mariomina/.github/commit/9842f3a8d5c843d04735ff51bb601572726f170d))
+
 ## [1.13.1](https://github.com/mariomina/.github/compare/v1.13.0...v1.13.1) (2026-11-19)
 
 
