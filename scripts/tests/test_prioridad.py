@@ -42,7 +42,8 @@ class Niveles(unittest.TestCase):
     def test_seguridad_es_p0(self):
         self.assertEqual(nivel(e("a", "fix(seguridad): .env legible por el agente")), ("P0", "seguridad"))
         self.assertEqual(nivel(e("b", "Token en el log", etiquetas={"security"}))[0], "P0")
-        self.assertEqual(nivel(e("c", "Bump x: CVE-2026-1234"))[0], "P0")
+        self.assertEqual(nivel(e("c", "fix(deps): CVE-2026-1234 en x"))[0], "P0")
+        self.assertEqual(nivel(e("v", "docs: cómo reportar vulnerabilidades"))[0], "P2")
         # Nombrar SECURITY.md no es un fallo de seguridad.
         self.assertEqual(nivel(e("d", "docs: SECURITY.md en español"))[0], "P2")
 

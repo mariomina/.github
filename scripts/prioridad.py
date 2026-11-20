@@ -6,7 +6,7 @@ cola de agentes (mariomina/mario-home#207) y `github_pendientes.py`, que avisa s
 
 Niveles (gana el primero que se cumple):
   P0  rompe algo en uso: el issue `FRENO:`; seguridad (etiqueta, tipo o ámbito del título convencional, o una
-      vulnerabilidad o CVE en el título); regresión (lo mismo, o un Bug con «regresión» en el título); CI rojo
+      Bug con una vulnerabilidad o un CVE en el título); regresión (lo mismo, o un Bug con «regresión» en el título); CI rojo
       en la rama principal de su repo, si el elemento es de CI (`area/ci`, `ci` en el título convencional o
       «CI» en el título)
   P1  está en el paso actual del plan, bloquea a uno que lo está, o es un Bug en uso (tipo Bug, etiqueta `bug` o
@@ -106,7 +106,7 @@ def _bloquea_al_paso(e, ctx):
 # (nivel, motivo, regla): la primera que se cumple da el nivel.
 REGLAS = (
     ("P0", "issue FRENO:", lambda e, ctx: e.titulo.startswith(FRENO)),
-    ("P0", "seguridad", lambda e, ctx: _marca(e, SEGURIDAD) or bool(RE_VULNERABILIDAD.search(e.titulo))),
+    ("P0", "seguridad", lambda e, ctx: _marca(e, SEGURIDAD) or (_es_bug(e) and bool(RE_VULNERABILIDAD.search(e.titulo)))),
     ("P0", "regresión", lambda e, ctx: _marca(e, REGRESION) or (_es_bug(e) and bool(RE_REGRESION.search(e.titulo)))),
     ("P0", "CI rojo en la rama principal", lambda e, ctx: e.ci_rojo and _es_ci(e)),
     ("P1", "paso actual del plan", lambda e, ctx: bool(ctx.paso_actual) and e.paso == ctx.paso_actual),
