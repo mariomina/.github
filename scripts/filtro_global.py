@@ -46,7 +46,7 @@ NIVELES = {"0", "1", "2"}
 # puntero: «- **nombre** (descripción): `ruta`»; la ruta, cualquiera bajo ~ (p. ej. ~/.hermes), es la que sigue a la
 # descripción, que puede nombrar otras rutas (mariomina/.github#48)
 RE_RUTA = re.compile(r"^\s*- \*\*[^*]+\*\*\s*(?:\((?:[^()]|\([^()]*\))*\))?:\s*`(~/[^`]+)`")
-RE_CLONE = re.compile(r"git@github\.com:([\w.-]+/[\w.-]+?)\.git")
+RE_CLONE = re.compile(r"(?:git@github\.com:|https://github\.com/)([\w.-]+/[\w.-]+?)\.git")
 RE_EXCEPCION = re.compile(
     r"(excepci[oó]n|no aplica|salvo|se ignora|ignora|no rige)[^.\n]{0,80}(regla(s)? global(es)?|mario-home)",
     re.I)
