@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.1](https://github.com/mariomina/.github/compare/v1.17.0...v1.17.1) (2026-11-21)
+
+
+### Correcciones
+
+* **filtro:** reconocer los punteros de clonado HTTPS ([#76](https://github.com/mariomina/.github/issues/76)) ([9ac7888](https://github.com/mariomina/.github/commit/9ac78886abac71372ac255b64f78e3fcb77aef95))
+
 ## [1.17.0](https://github.com/mariomina/.github/compare/v1.16.0...v1.17.0) (2026-11-20)
 
 
