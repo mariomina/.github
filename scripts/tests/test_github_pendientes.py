@@ -299,8 +299,8 @@ class Repos(unittest.TestCase):
         filtro = gp.cargar_filtro()
         textos = {
             gp.HOME_REPO: "tipo-repo: home\n\n## Otros repos\n\n"
-                          "- **a**: `~/Documentos/Mario/a`. `git clone git@github.com:o/a.git`.\n"
-                          "- **ag**: `~/Documentos/Mario/ag`. `git clone git@github.com:e/ag.git`.\n"
+                          "- **a**: `~/Documentos/Mario/a`. `git clone https://github.com/o/a.git`.\n"
+                          "- **ag**: `~/Documentos/Mario/ag`. `git clone https://github.com/e/ag.git`.\n"
                           "- **x**: `~/Documentos/Mario/x-<slug>`.\n",
             "o/a": "tipo-repo: producto\n",
             "e/ag": "tipo-repo: home\n\n## Otros repos\n\n"

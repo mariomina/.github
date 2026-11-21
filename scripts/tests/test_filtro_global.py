@@ -125,10 +125,11 @@ class FiltroGlobal(unittest.TestCase):
         self.assertIn(("o/cliente-x", "duplicado-de-global"), self.reglas(r))
 
     def test_puntero_con_otra_ruta_en_la_descripcion(self):
-        """mariomina/.github#48: la ruta del repo es la que sigue a la descripción, no la primera entre comillas."""
+        """mariomina/.github#48: la ruta del repo es la que sigue a la descripción, no la primera entre comillas.
+        El remoto vale en HTTPS (mario-claude) y en SSH (mario-hermes): mariomina/.github#75."""
         claude = ("- **mario-claude** (infraestructura de Claude Code, CLI y app: versión de configuración y métricas "
                   "de uso; nunca es `~/.claude`): `~/Documentos/Mario/mario-claude`. Si falta: `git clone "
-                  "git@github.com:mariomina/mario-claude.git ~/Documentos/Mario/mario-claude`.\n")
+                  "https://github.com/mariomina/mario-claude.git ~/Documentos/Mario/mario-claude`.\n")
         hermes = ("- **mario-hermes** (agente Hermes: su perfil por defecto como distribución; Hermes exige "
                   "`~/.hermes`, y `~/Documentos/Mario/mario-hermes` es un symlink a esa carpeta): `~/.hermes`. "
                   "Si falta (Hermes recién instalado): `git -C ~/.hermes init && git -C ~/.hermes remote add origin "
