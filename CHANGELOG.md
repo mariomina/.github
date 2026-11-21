@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.2](https://github.com/mariomina/.github/compare/v1.17.1...v1.17.2) (2026-11-21)
+
+
+### Correcciones
+
+* **ci:** los reutilizables leen sus scripts de su propio commit, no de main ([#78](https://github.com/mariomina/.github/issues/78)) ([f14b8d1](https://github.com/mariomina/.github/commit/f14b8d1928adaee7ef895d2d14fd5c6171b87c4d))
+
 ## [1.17.1](https://github.com/mariomina/.github/compare/v1.17.0...v1.17.1) (2026-11-21)
 
 
