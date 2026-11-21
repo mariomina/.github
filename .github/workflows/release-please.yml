@@ -77,12 +77,13 @@ jobs:
           token: ${{ steps.app.outputs.token || github.token }}
           config-file: ${{ inputs.config-file }}
           manifest-file: ${{ inputs.manifest-file }}
-      # La fusión es `github_pendientes.py --fusionar-version` (con tests en scripts/tests), desde la rama
-      # principal de mariomina/.github, como agents-md.yml.
+      # La fusión es `github_pendientes.py --fusionar-version` (con tests en scripts/tests), del mismo commit
+      # de mariomina/.github que este reutilizable, como agents-md.yml.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.rp.outputs.prs_created == 'true' && steps.app.outputs.token != ''
         with:
-          repository: mariomina/.github
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}  # no main (mariomina/mario-home#38)
           path: .mantenimiento
           sparse-checkout: scripts/github_pendientes.py
           sparse-checkout-cone-mode: false

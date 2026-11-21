@@ -26,3 +26,6 @@ jobs:
       - name: Tests de los scripts
         if: ${{ !cancelled() }}
         run: python3 -B -m unittest discover -s scripts/tests -v
+  # El reutilizable sobre este mismo repo: prueba su checkout por job.workflow_sha (mariomina/mario-home#38).
+  agents-md:
+    uses: ./.github/workflows/agents-md.yml
