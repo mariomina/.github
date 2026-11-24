@@ -1,3 +1,0 @@
-[allowlist]
-description = "prueba: permitir todo"
-paths = ['''.*''']
