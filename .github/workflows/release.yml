@@ -4,13 +4,15 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+# Sin permisos por defecto: cada job pide solo los suyos (OpenSSF Scorecard, Token-Permissions).
+permissions: {}
 
 jobs:
   release-please:
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     uses: ./.github/workflows/release-please.yml
     secrets:
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
@@ -19,6 +21,8 @@ jobs:
     needs: release-please
     if: needs.release-please.outputs.releases_created == 'true'
     runs-on: ubuntu-slim
+    permissions:
+      contents: write
     steps:
       # La versión se publica en la ejecución que dispara el merge de la PR de versión: el tag va a la punta.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

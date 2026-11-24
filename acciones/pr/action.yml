@@ -93,14 +93,15 @@ runs:
     - name: Lint
       if: ${{ !cancelled() && steps.instalar.outcome == 'success' }}
       shell: bash
-      # Usa la versión de ruff del proyecto si la declara; si no, la última
-      run: uv run --with ruff ruff check .
+      # Usa la versión de ruff del proyecto si la declara; si no, la fijada aquí
+      run: if [ -x .venv/bin/ruff ]; then uv run ruff check .; else uv run --with ruff==0.17.5 ruff check .; fi
     - name: Tests
       if: ${{ !cancelled() && steps.instalar.outcome == 'success' }}
       shell: bash
       run: |
         if [ ! -d tests ]; then echo "Sin carpeta tests/"; exit 0; fi
-        rc=0; uv run --with pytest pytest -q || rc=$?
+        # Usa la versión de pytest del proyecto si la declara; si no, la fijada aquí
+        rc=0; if [ -x .venv/bin/pytest ]; then uv run pytest -q || rc=$?; else uv run --with pytest==9.2.0 pytest -q || rc=$?; fi
         # 5 = no se recogió ningún test (repo recién creado)
         if [ "$rc" -eq 5 ]; then echo "Sin tests todavía"; exit 0; fi
         exit "$rc"
