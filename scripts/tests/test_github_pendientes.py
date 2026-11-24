@@ -64,11 +64,13 @@ def acciones(estado):
     return {(p["repo"], p["numero"]): (p["clase"], p["accion"]) for p in estado["prs"]}
 
 
-def recoger(nodos, token="t", plantilla=PLANTILLA, entorno=None, metricas=None, tp=None, proyectos=None, red=None):
+def recoger(nodos, token="t", plantilla=PLANTILLA, entorno=None, metricas=None, tp=None, proyectos=None, red=None,
+            workflows=()):
     """(gp.recoger sin red, filtro_global simulado). `plantilla`: texto de 2-tarea.yml en GitHub, None si no
     existe o la excepción al leerla; `metricas`: la excepción de consultar_metricas; `tp`: el token que ve los
     Projects (token_proyectos); `proyectos`: {repo: issues como en repo()} que ve `tp`, o la excepción de esa
-    consulta; `red`: lista donde se anota (consulta, token, repos) de cada consulta GraphQL."""
+    consulta; `red`: lista donde se anota (consulta, token, repos) de cada consulta GraphQL; `workflows`: avisos
+    de workflows_desactivados."""
     red = [] if red is None else red
 
     def http(metodo, url, token, cuerpo=None):
@@ -87,7 +89,7 @@ def recoger(nodos, token="t", plantilla=PLANTILLA, entorno=None, metricas=None, 
             mock.patch.object(gp, "repos", return_value=list(nodos)), \
             mock.patch.object(gp, "http", http), \
             mock.patch.object(gp, "token_proyectos", return_value=tp), \
-            mock.patch.object(gp, "workflows_desactivados", return_value=[]), \
+            mock.patch.object(gp, "workflows_desactivados", return_value=list(workflows)), \
             mock.patch.object(gp, "consultar_metricas", return_value={}, side_effect=metricas), \
             mock.patch.object(gp, "freno", return_value=None), \
             mock.patch.dict("os.environ", entorno or {}):
@@ -183,12 +185,39 @@ class Clasificacion(unittest.TestCase):
 
     def test_avisos(self):
         nodos = {"o/a": repo([pr(1, "feat: vieja", "feat/1", edad=timedelta(days=9))], principal="FAILURE",
-                             ramas=[("feat/vieja", timedelta(days=8)), ("feat/nueva", timedelta(days=1)),
+                             ramas=[("feat/vieja", timedelta(days=8)), ("feat/nueva", timedelta(hours=23)),
                                     ("feat/1", timedelta(days=9))],
                              issues=[(5, 0), (6, 1)])}
         avisos = sorted((a["tipo"], a["detalle"].split(" ")[0]) for a in gp.analizar(nodos, [], AHORA)["avisos"])
         self.assertEqual(avisos, [("ci-rojo", "CI"), ("issue-sin-proyecto", "#5"), ("pr-vieja", "#1"),
                                   ("rama-vieja", "feat/vieja")])
+
+    def test_ramas_cortas_segun_dora(self):
+        """mario-home#361: rama o PR de más de 24 h y más de 3 ramas activas se avisan."""
+        def avisos(prs=(), ramas=()):
+            return [(a["tipo"], a["detalle"]) for a in gp.analizar({"o/a": repo(prs, ramas=ramas)}, [], AHORA)["avisos"]]
+        self.assertEqual(avisos(ramas=[("feat/a", timedelta(hours=25))]),
+                         [("rama-vieja", "feat/a (último commit 2026-11-13, sin PR)")])
+        self.assertEqual(avisos(ramas=[("feat/a", timedelta(hours=23))]), [])
+        self.assertEqual(avisos([pr(1, "feat: a", "feat/a", edad=timedelta(hours=25))]), [("pr-vieja", "#1 feat: a")])
+        self.assertEqual(avisos([pr(1, "feat: a", "feat/a", edad=timedelta(hours=23))]), [])
+        cuatro = [(f"feat/{i}", timedelta(hours=1)) for i in range(4)]
+        self.assertEqual(avisos(ramas=cuatro), [("muchas-ramas", "4 ramas activas (máximo 3)")])
+        self.assertEqual(avisos(ramas=cuatro[:3]), [])
+
+    def test_main_en_rojo_sale_primero(self):
+        nodos = {"o/a": repo([pr(1, "feat: a", "feat/a", edad=timedelta(days=2))]),
+                 "mariomina/b": repo(principal="FAILURE")}
+        estado = gp.analizar(nodos, [], AHORA)
+        self.assertEqual([a["tipo"] for a in estado["avisos"]], ["ci-rojo", "pr-vieja"])
+        self.assertTrue(gp.resumen(estado, AHORA).startswith(
+            "GitHub: CI rojo en la rama principal (b) · 1 esperan tu decisión: PR de trabajo (o/a#1)"))
+        self.assertIn("Avisos (2):\n  mariomina/b · ci-rojo", gp.tabla(estado, AHORA))
+        self.assertTrue(gp.resumen(gp.analizar({"o/a": repo()}, [], AHORA), AHORA).startswith(
+            "GitHub: nada espera tu decisión"))
+        desactivado = {"repo": "o/a", "tipo": "workflow-desactivado", "detalle": "x.yml"}
+        estado, _ = recoger(nodos, workflows=[desactivado])
+        self.assertEqual([a["tipo"] for a in estado["avisos"]], ["ci-rojo", "workflow-desactivado", "pr-vieja"])
 
     def test_sin_aviso_de_proyecto_si_el_token_no_ve_los_projects(self):
         nodos = {"o/a": repo(issues=[(5, 0)]), "o/b": repo(issues=[(7, 0)])}
