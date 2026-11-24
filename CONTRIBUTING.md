@@ -4,7 +4,7 @@
    - **Agentes:** `python3 -I entorno/control.py alta issue` de `mario-home` (mariomina/mario-home#234). Sale con 1 y dice qué falta si no se da un dato o si `area/<x>` no existe en el repo.
    - **Mario:** el formulario del tipo en «New issue», que fija tipo y Project; después, la etiqueta `area/<x>`, la épica y los campos del Project.
    - **Prioridad:** la calcula `scripts/prioridad.py` (`prioridad()`); para poner otra, una línea `Motivo de prioridad: <texto>` en el cuerpo.
-2. **Una rama por issue**, desde `main`: `feat/<n>-<slug>`, `fix/<n>-<slug>`, `docs/<n>-<slug>`, `chore/<n>-<slug>` o `experiment/<slug>`.
+2. **Una rama por issue**, desde `main`, con un nombre corto y descriptivo (GitHub flow). Ningún check exige un formato.
 3. **Commits pequeños** con [Conventional Commits](https://www.conventionalcommits.org/es/v1.0.0/) (`feat:`, `fix:`, `docs:`, `chore:`…).
 4. **Una PR por rama**, con título convencional (lo comprueba el check `pr`). Si el objetivo necesita varias PR, las intermedias llevan `Refs #<n>` y la última `Closes #<n>`. La PR hereda la etiqueta `area/<x>` de su issue y entra en el Project: los agentes, con `control.py alta pr`; Mario, a mano.
 5. **CI en verde** antes de fusionar. **Solo squash:** una PR es un commit en `main`, con el título de la PR como mensaje; revertir es una sola operación. La rama se borra al fusionar.

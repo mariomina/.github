@@ -12,6 +12,15 @@ Incluye:
 
 ## Qué esperar
 
-1. Confirmación de recepción.
-2. Evaluación de la gravedad.
-3. Corrección en una rama privada si hace falta y, en productos, versión publicada con su nota.
+1. Confirmación de recepción en 3 días hábiles.
+2. Evaluación de la gravedad (CVSS) en 7 días desde la confirmación.
+3. Corrección en una rama privada si hace falta y, en productos, versión publicada con su nota. Plazo desde la evaluación:
+
+| Gravedad | Corrección o mitigación |
+|---|---|
+| Crítica | 7 días |
+| Alta | 30 días |
+| Media | 90 días |
+| Baja | Siguiente versión |
+
+Si un plazo no se puede cumplir, se avisa a quien informó con el motivo y la fecha nueva.
