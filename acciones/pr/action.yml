@@ -5,7 +5,7 @@
 #   - uses: mariomina/.github/acciones/pr@v1
 #     with:
 #       agents-md: "false"   # si el filtro global ya comprueba el AGENTS.md del repo (mario-home)
-# El paso de secretos lee el diff de la PR con el mismo token: no necesita historia en el checkout.
+# El paso de secretos lee los archivos de la PR por la API con el mismo token: no necesita historia en el checkout.
 # Cada paso corre aunque falle el anterior: un título mal escrito no oculta el resultado de los tests.
 name: pr
 description: Título convencional, estructura de AGENTS.md, secretos y CI de Python (uv) en un solo job.
