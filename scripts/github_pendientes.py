@@ -425,6 +425,11 @@ def avisos_prioridad(issues, rojos):
     return avisos
 
 
+def rojo_primero(aviso):
+    """Clave de orden: un main en rojo va antes que cualquier otro trabajo (DORA, continuous integration)."""
+    return aviso["tipo"] != "ci-rojo"
+
+
 def analizar(nodos, errores, ahora, sin_proyectos=(), contrato=()):
     """Estado completo desde las respuestas de GitHub: PR clasificadas, avisos y errores.
     `sin_proyectos`: repos cuyo token no ve los Projects; sin avisos de Projects (serían falsos).
@@ -475,7 +480,7 @@ def analizar(nodos, errores, ahora, sin_proyectos=(), contrato=()):
                 avisos.append({"repo": repo, "tipo": "listo-sin-contrato",
                                "detalle": f"#{i['number']} {i['title']} (falta: {', '.join(falta)})", "url": i.get("url")})
     avisos += avisos_prioridad(con_proyectos, rojos)
-    avisos.sort(key=lambda a: a["tipo"] != "ci-rojo")  # un main en rojo va antes que cualquier otro trabajo
+    avisos.sort(key=rojo_primero)
     return {"generado": ahora.isoformat(timespec="seconds"), "repos": list(nodos), "prs": prs,
             "avisos": avisos, "errores": errores}
 
@@ -532,7 +537,7 @@ def recoger(token, ahora=None):
     if not etiquetas:
         errores.append({"repo": "contrato", "detalle": f"{'/'.join(PLANTILLA_TAREA)}: {motivo}"[:160]})
     estado = analizar(nodos, errores, ahora or datetime.now(timezone.utc), ciegos, etiquetas)
-    estado["avisos"] = workflows_desactivados(nombres, token) + estado["avisos"]
+    estado["avisos"] = sorted(workflows_desactivados(nombres, token) + estado["avisos"], key=rojo_primero)
     try:
         estado["freno"] = freno(token)
     except Fallo:
