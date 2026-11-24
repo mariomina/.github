@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.0](https://github.com/mariomina/.github/compare/v1.18.0...v1.19.0) (2026-11-24)
+
+
+### Novedades
+
+* **pendientes:** ramas cortas según DORA, aviso a las 24 h y con más de 3 ramas ([#83](https://github.com/mariomina/.github/issues/83)) ([f60ad47](https://github.com/mariomina/.github/commit/f60ad47f5c067aa6b16ff99fc9f319e38bd39147))
+
 ## [1.18.0](https://github.com/mariomina/.github/compare/v1.17.2...v1.18.0) (2026-11-24)
 
 
