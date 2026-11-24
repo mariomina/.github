@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/mariomina/.github/compare/v1.17.2...v1.18.0) (2026-11-24)
+
+
+### Novedades
+
+* **pr:** escaneo de secretos con gitleaks en cada PR ([#82](https://github.com/mariomina/.github/issues/82)) ([840096f](https://github.com/mariomina/.github/commit/840096fda725dcb797b03ef3a275238dbe69fd7d))
+
 ## [1.17.2](https://github.com/mariomina/.github/compare/v1.17.1...v1.17.2) (2026-11-21)
 
 
