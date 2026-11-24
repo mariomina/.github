@@ -183,12 +183,36 @@ class Clasificacion(unittest.TestCase):
 
     def test_avisos(self):
         nodos = {"o/a": repo([pr(1, "feat: vieja", "feat/1", edad=timedelta(days=9))], principal="FAILURE",
-                             ramas=[("feat/vieja", timedelta(days=8)), ("feat/nueva", timedelta(days=1)),
+                             ramas=[("feat/vieja", timedelta(days=8)), ("feat/nueva", timedelta(hours=23)),
                                     ("feat/1", timedelta(days=9))],
                              issues=[(5, 0), (6, 1)])}
         avisos = sorted((a["tipo"], a["detalle"].split(" ")[0]) for a in gp.analizar(nodos, [], AHORA)["avisos"])
         self.assertEqual(avisos, [("ci-rojo", "CI"), ("issue-sin-proyecto", "#5"), ("pr-vieja", "#1"),
                                   ("rama-vieja", "feat/vieja")])
+
+    def test_ramas_cortas_segun_dora(self):
+        """mario-home#361: rama o PR de más de 24 h y más de 3 ramas activas se avisan."""
+        def avisos(prs=(), ramas=()):
+            return [(a["tipo"], a["detalle"]) for a in gp.analizar({"o/a": repo(prs, ramas=ramas)}, [], AHORA)["avisos"]]
+        self.assertEqual(avisos(ramas=[("feat/a", timedelta(hours=25))]),
+                         [("rama-vieja", "feat/a (último commit 2026-11-13, sin PR)")])
+        self.assertEqual(avisos(ramas=[("feat/a", timedelta(hours=23))]), [])
+        self.assertEqual(avisos([pr(1, "feat: a", "feat/a", edad=timedelta(hours=25))]), [("pr-vieja", "#1 feat: a")])
+        self.assertEqual(avisos([pr(1, "feat: a", "feat/a", edad=timedelta(hours=23))]), [])
+        cuatro = [(f"feat/{i}", timedelta(hours=1)) for i in range(4)]
+        self.assertEqual(avisos(ramas=cuatro), [("muchas-ramas", "4 ramas activas (máximo 3)")])
+        self.assertEqual(avisos(ramas=cuatro[:3]), [])
+
+    def test_main_en_rojo_sale_primero(self):
+        nodos = {"o/a": repo([pr(1, "feat: a", "feat/a", edad=timedelta(days=2))]),
+                 "mariomina/b": repo(principal="FAILURE")}
+        estado = gp.analizar(nodos, [], AHORA)
+        self.assertEqual([a["tipo"] for a in estado["avisos"]], ["ci-rojo", "pr-vieja"])
+        self.assertTrue(gp.resumen(estado, AHORA).startswith(
+            "GitHub: CI rojo en la rama principal (b) · 1 esperan tu decisión: PR de trabajo (o/a#1)"))
+        self.assertIn("Avisos (2):\n  mariomina/b · ci-rojo", gp.tabla(estado, AHORA))
+        self.assertTrue(gp.resumen(gp.analizar({"o/a": repo()}, [], AHORA), AHORA).startswith(
+            "GitHub: nada espera tu decisión"))
 
     def test_sin_aviso_de_proyecto_si_el_token_no_ve_los_projects(self):
         nodos = {"o/a": repo(issues=[(5, 0)]), "o/b": repo(issues=[(7, 0)])}

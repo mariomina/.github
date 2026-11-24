@@ -11,8 +11,11 @@ Decisiones de Mario (mariomina/mario-2-cerebro#280):
     si es de parche, menor o mayor (título sin semver o versión 0.x: mayor).
   - PR de trabajo: espera la decisión de Mario.
   - Avisos (nunca se borra ni se cierra nada): workflow desactivado por 60 días sin actividad (no vuelve
-    con ningún trigger: el aviso da el `gh workflow enable` que lo recupera), CI rojo en la rama principal,
-    ramas sin PR y PR de más de 7 días, issues abiertos sin proyecto, issues en Listo del Project a las que
+    con ningún trigger: el aviso da el `gh workflow enable` que lo recupera), CI rojo en la rama principal
+    (primero en la tabla y en la línea «GitHub:»: DORA, «fixing it should take priority over any other work»),
+    ramas sin PR y PR de más de 24 h y repos con más de 3 ramas activas (DORA trunk-based development: «Merge
+    branches to trunk at least once a day», «three or fewer active branches»; mariomina/mario-home#361),
+    issues abiertos sin proyecto, issues en Listo del Project a las que
     les falta un campo obligatorio de .github/ISSUE_TEMPLATE/2-tarea.yml (listo-sin-contrato, mario-home#207),
     issues cuya Prioridad del Project no es la que calcula scripts/prioridad.py y no dan «Motivo de prioridad:»
     (prioridad-distinta), y P0 que ya no se cumplen, con motivo o sin él (prioridad-p0-caducada; mario-home#239).
@@ -89,7 +92,8 @@ CACHE = Path.home() / ".cache" / "mariomina-github" / "pendientes.json"  # fija:
 CADUCA = timedelta(minutes=10)      # caché más vieja: `--linea` la refresca en segundo plano
 BLOQUEO = timedelta(minutes=2)      # un refresco en curso no se lanza dos veces
 VERSION_SIN_CI = timedelta(minutes=10)  # PR de versión sin checks tras este tiempo: espera a Mario
-VIEJA = timedelta(days=7)
+VIEJA = timedelta(hours=24)  # DORA: fusionar en trunk al menos una vez al día
+MAX_RAMAS = 3  # DORA: tres ramas activas o menos, sin contar la principal
 MAX_REFS_LINEA = 4
 METODOS = ("squash", "merge", "rebase")  # en este orden, los que el repo permita (squash: mariomina/.github#27)
 ESPERA_CI = timedelta(minutes=10)        # `--fusionar-version` espera al CI de la PR hasta este plazo
@@ -448,9 +452,13 @@ def analizar(nodos, errores, ahora, sin_proyectos=(), contrato=()):
             avisos.append({"repo": repo, "tipo": "ci-rojo", "detalle": f"CI rojo en {principal.get('name')}"})
             rojos.add(repo)
         con_pr = {pr.get("headRefName") for pr in abiertas}
-        for ref in (n.get("refs") or {}).get("nodes") or []:
+        ramas = [r for r in (n.get("refs") or {}).get("nodes") or [] if r["name"] != principal.get("name")]
+        if len(ramas) > MAX_RAMAS:
+            avisos.append({"repo": repo, "tipo": "muchas-ramas",
+                           "detalle": f"{len(ramas)} ramas activas (máximo {MAX_RAMAS})"})
+        for ref in ramas:
             fecha = (ref.get("target") or {}).get("committedDate")
-            if ref["name"] == principal.get("name") or ref["name"] in con_pr or not fecha:
+            if ref["name"] in con_pr or not fecha:
                 continue
             if ahora - _fecha(fecha) > VIEJA:
                 avisos.append({"repo": repo, "tipo": "rama-vieja",
@@ -467,6 +475,7 @@ def analizar(nodos, errores, ahora, sin_proyectos=(), contrato=()):
                 avisos.append({"repo": repo, "tipo": "listo-sin-contrato",
                                "detalle": f"#{i['number']} {i['title']} (falta: {', '.join(falta)})", "url": i.get("url")})
     avisos += avisos_prioridad(con_proyectos, rojos)
+    avisos.sort(key=lambda a: a["tipo"] != "ci-rojo")  # un main en rojo va antes que cualquier otro trabajo
     return {"generado": ahora.isoformat(timespec="seconds"), "repos": list(nodos), "prs": prs,
             "avisos": avisos, "errores": errores}
 
@@ -802,15 +811,17 @@ def resumen(estado, ahora):
         return f"GitHub: FRENO activo, no se fusiona nada ({estado['freno']}) · {_hace(estado['generado'], ahora)}"
     prs = estado.get("prs", [])
     decisiones = [p for p in prs if p["accion"] == "decision"]
+    rojos = [_corto(a["repo"]) for a in estado.get("avisos", []) if a["tipo"] == "ci-rojo"]
+    texto = f"GitHub: CI rojo en la rama principal ({', '.join(rojos)}) · " if rojos else "GitHub: "
     if decisiones:
         grupos = {}
         for p in decisiones:
             grupos.setdefault(p["motivo"], []).append(f"{_corto(p['repo'])}#{p['numero']}")
         partes = [f"{m} ({', '.join(r[:MAX_REFS_LINEA])}{', …' if len(r) > MAX_REFS_LINEA else ''})"
                   for m, r in grupos.items()]
-        texto = f"GitHub: {len(decisiones)} esperan tu decisión: {'; '.join(partes)}"
+        texto += f"{len(decisiones)} esperan tu decisión: {'; '.join(partes)}"
     else:
-        texto = "GitHub: nada espera tu decisión"
+        texto += "nada espera tu decisión"
     solas = sum(p["accion"] in ("fusionar", "esperar") for p in prs)
     if solas:
         texto += f" · {solas} se fusionan solas"
