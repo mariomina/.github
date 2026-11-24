@@ -5,9 +5,10 @@
 #   - uses: mariomina/.github/acciones/pr@v1
 #     with:
 #       agents-md: "false"   # si el filtro global ya comprueba el AGENTS.md del repo (mario-home)
+# El paso de secretos lee el diff de la PR con el mismo token: no necesita historia en el checkout.
 # Cada paso corre aunque falle el anterior: un título mal escrito no oculta el resultado de los tests.
 name: pr
-description: Título convencional, estructura de AGENTS.md y CI de Python (uv) en un solo job.
+description: Título convencional, estructura de AGENTS.md, secretos y CI de Python (uv) en un solo job.
 
 inputs:
   token:
@@ -18,6 +19,9 @@ inputs:
     default: "true"
   agents-md:
     description: Comprobar el AGENTS.md con el filtro global (modo repo)
+    default: "true"
+  secretos:
+    description: Buscar secretos con gitleaks en las líneas que añade la PR
     default: "true"
   python:
     description: Marcas de conflicto siempre; con pyproject.toml, además lint y tests con uv
@@ -52,6 +56,16 @@ runs:
       if: ${{ !cancelled() && inputs.agents-md == 'true' }}
       shell: bash
       run: python3 -I "$GITHUB_ACTION_PATH/../../scripts/filtro_global.py" --repo .
+    # Secret scanning de GitHub solo es gratis en repos públicos; en los privados exige GitHub Secret Protection
+    # (https://docs.github.com/en/code-security/secret-scanning/introduction/about-secret-scanning). Este paso
+    # cubre todos los repos que llaman a la acción (mariomina/.github#80).
+    - name: Secretos (gitleaks, líneas que añade la PR)
+      if: ${{ !cancelled() && inputs.secretos == 'true' && startsWith(github.event_name, 'pull_request') }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        PR: ${{ github.event.pull_request.number }}
+      run: python3 -I "$GITHUB_ACTION_PATH/../../scripts/secretos.py" "$PR"
     - name: Sin marcas de conflicto
       if: ${{ !cancelled() && inputs.python == 'true' }}
       shell: bash
