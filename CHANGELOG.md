@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.1](https://github.com/mariomina/.github/compare/v1.19.0...v1.19.1) (2026-11-24)
+
+
+### Correcciones
+
+* **ci:** permisos por job, ruff y pytest fijados, plazos de seguridad y v1 documentado ([#86](https://github.com/mariomina/.github/issues/86)) ([ee909f0](https://github.com/mariomina/.github/commit/ee909f0f0b09bee16a56645e22dc441cc7ce6be3))
+
 ## [1.19.0](https://github.com/mariomina/.github/compare/v1.18.0...v1.19.0) (2026-11-24)
 
 
